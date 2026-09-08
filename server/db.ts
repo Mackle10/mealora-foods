@@ -83,14 +83,14 @@ export async function createOrderForUser(input: { userId: number; restaurantId: 
   const menu = await db.select().from(menuItems).where(and(eq(menuItems.restaurantId, input.restaurantId), inArray(menuItems.id, ids), eq(menuItems.isAvailable, 1)));
   if (menu.length !== input.items.length) throw new Error("One or more menu items are unavailable");
   const subtotalCents = input.items.reduce((sum, item) => sum + (menu.find(menuItem => menuItem.id === item.menuItemId)?.priceCents ?? 0) * item.quantity, 0);
-  const deliveryFeeCents = subtotalCents >= 2500 ? 0 : 299;
+  const deliveryFeeCents = subtotalCents >= 35000 ? 0 : 3000;
   const totalCents = subtotalCents + deliveryFeeCents;
   const orderNumber = `MEA-${Date.now().toString(36).toUpperCase()}`;
-  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "USD", deliveryAddress: input.deliveryAddress, courierName: "Kofi", courierLatE6: 5572200, courierLngE6: -193800, etaMinutes: 24 }).$returningId();
+  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "UGX", deliveryAddress: input.deliveryAddress, courierName: "Moses", courierLatE6: 326600, courierLngE6: 32582500, etaMinutes: 24 }).$returningId();
   const orderId = inserted[0]?.id;
   if (!orderId) throw new Error("Order could not be created");
   await db.insert(orderItems).values(input.items.map(item => { const menuItem = menu.find(candidate => candidate.id === item.menuItemId)!; return { orderId, menuItemId: menuItem.id, itemName: menuItem.name, unitPriceCents: menuItem.priceCents, quantity: item.quantity }; }));
-  return { orderId, orderNumber, totalCents, currency: "USD", paymentStatus: "payment_setup_required" as const };
+  return { orderId, orderNumber, totalCents, currency: "UGX", paymentStatus: "payment_setup_required" as const };
 }
 
 export async function createPartnerApplication(input: { userId: number; applicationType: "restaurant" | "courier" | "business"; businessName: string; contactEmail: string; city: string; details: string }) {

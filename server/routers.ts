@@ -32,10 +32,11 @@ export const appRouter = router({
     }),
     restaurants: publicProcedure.input(z.object({ citySlug: z.string().optional(), cuisine: z.string().optional(), query: z.string().optional() }).optional()).query(async ({ input }) => {
       const dbRows = await getRestaurantsFromDb();
-      const source = dbRows.length ? dbRows.map(row => ({ ...row, rating: row.ratingBasis / 100, isOpen: Boolean(row.isOpen) })) : fallbackRestaurants;
+      const source = dbRows.length ? dbRows.map(row => ({ ...row, rating: row.ratingBasis / 100, priceBand: row.priceBand.startsWith("UGX") ? row.priceBand : `UGX ${row.priceBand}`, isOpen: Boolean(row.isOpen) })) : fallbackRestaurants;
       const city = input?.citySlug?.toLowerCase();
+      const cityId = city ? fallbackCities.find(entry => entry.slug === city)?.id : undefined;
       const query = input?.query?.toLowerCase();
-      return source.filter(restaurant => (!query || `${restaurant.name} ${restaurant.cuisine} ${restaurant.description}`.toLowerCase().includes(query)) && (!input?.cuisine || input.cuisine === "All cuisines" || restaurant.cuisine.toLowerCase().includes(input.cuisine.toLowerCase())) && (!city || restaurant.slug.includes(city) || restaurant.name.toLowerCase().includes(city)));
+      return source.filter(restaurant => (!query || `${restaurant.name} ${restaurant.cuisine} ${restaurant.description}`.toLowerCase().includes(query)) && (!input?.cuisine || input.cuisine === "All cuisines" || restaurant.cuisine.toLowerCase().includes(input.cuisine.toLowerCase())) && (!cityId || restaurant.cityId === cityId));
     }),
     menu: publicProcedure.input(z.object({ restaurantId: z.number() })).query(async ({ input }) => {
       const dbRows = await getMenuFromDb(input.restaurantId);
@@ -46,15 +47,15 @@ export const appRouter = router({
     suggest: publicProcedure.input(z.object({ query: z.string().min(2).max(240) })).mutation(async ({ input }) => {
       const fallback = {
         intent: input.query,
-        cuisines: input.query.toLowerCase().includes("spicy") ? ["West African", "Mexican", "Indian"] : input.query.toLowerCase().includes("healthy") ? ["Plant-forward", "Japanese", "Mediterranean"] : ["West African", "Japanese", "Plant-forward"],
-        meals: input.query.toLowerCase().includes("breakfast") ? ["pastry box", "coffee", "morning bowl"] : input.query.toLowerCase().includes("date") ? ["small plates", "ramen", "wine-friendly dishes"] : ["jollof bowl", "ramen", "seasonal market bowl"],
-        explanation: "Curated by your words, then refined by what is open nearby.",
+        cuisines: input.query.toLowerCase().includes("spicy") ? ["Ugandan", "East African", "Lakeside grill"] : input.query.toLowerCase().includes("healthy") ? ["Lakeside grill", "Ugandan", "Coffee & bakery"] : ["Ugandan", "Street food", "Lakeside grill"],
+        meals: input.query.toLowerCase().includes("breakfast") ? ["Kampala rolex", "chapati", "highland coffee"] : input.query.toLowerCase().includes("date") ? ["Lake Victoria tilapia", "local small plates", "passion fruit drink"] : ["matoke & grilled chicken", "Jinja street box", "Lake Victoria tilapia"],
+        explanation: "Curated from Uganda's local flavours, then refined by what is open nearby.",
       };
       try {
         const response = await invokeLLM({
           model: "gpt-5-mini",
           messages: [
-            { role: "system", content: "You are Mealora's food concierge. Convert natural language cravings into concise cuisine and meal suggestions. Return valid JSON only." },
+            { role: "system", content: "You are Mealora Uganda's food concierge. Convert natural language cravings into concise suggestions using Ugandan and East African food, local restaurants, drinks, and delivery context. Return valid JSON only." },
             { role: "user", content: input.query },
           ],
           response_format: { type: "json_schema", json_schema: { name: "meal_suggestions", strict: true, schema: { type: "object", properties: { intent: { type: "string" }, cuisines: { type: "array", items: { type: "string" } }, meals: { type: "array", items: { type: "string" } }, explanation: { type: "string" } }, required: ["intent", "cuisines", "meals", "explanation"], additionalProperties: false } } },
@@ -80,7 +81,7 @@ export const appRouter = router({
       const row = await db.select().from(orders).where(and(eq(orders.id, input.orderId), eq(orders.userId, ctx.user.id))).limit(1);
       if (!row[0]) return fallbackTracking;
       const order = row[0];
-      return { ...fallbackTracking, status: order.status, label: order.status === "delivered" ? "Delivered" : `Order ${order.status.replace("_", " ")}`, etaMinutes: order.etaMinutes ?? 18, courierName: order.courierName ?? "Kofi", courierLat: (order.courierLatE6 ?? 5572200) / 1e6, courierLng: (order.courierLngE6 ?? -193800) / 1e6, updatedAt: Date.now() };
+      return { ...fallbackTracking, status: order.status, label: order.status === "delivered" ? "Delivered" : `Order ${order.status.replace("_", " ")}`, etaMinutes: order.etaMinutes ?? 18, courierName: order.courierName ?? "Moses", courierLat: (order.courierLatE6 ?? 326600) / 1e6, courierLng: (order.courierLngE6 ?? 32582500) / 1e6, updatedAt: Date.now() };
     }),
   }),
   partners: router({

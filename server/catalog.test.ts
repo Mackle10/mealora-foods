@@ -4,6 +4,8 @@ import { fallbackCities, fallbackMenu, fallbackRestaurants, fallbackTracking } f
 describe("Mealora catalog", () => {
   it("contains city, restaurant, and menu records for discovery", () => {
     expect(fallbackCities.length).toBeGreaterThanOrEqual(4);
+    expect(fallbackCities.every(city => city.country === "Uganda")).toBe(true);
+    expect(fallbackCities.map(city => city.name)).toEqual(["Kampala", "Entebbe", "Jinja", "Mbarara"]);
     expect(fallbackRestaurants.length).toBeGreaterThanOrEqual(4);
     expect(fallbackMenu.length).toBeGreaterThanOrEqual(5);
     expect(new Set(fallbackCities.map(city => city.slug)).size).toBe(fallbackCities.length);
@@ -14,6 +16,7 @@ describe("Mealora catalog", () => {
     const restaurantIds = new Set(fallbackRestaurants.map(restaurant => restaurant.id));
     expect(fallbackMenu.every(item => restaurantIds.has(item.restaurantId))).toBe(true);
     expect(fallbackMenu.every(item => item.priceCents > 0 && item.isAvailable)).toBe(true);
+    expect(fallbackMenu.every(item => item.currency === "UGX")).toBe(true);
   });
 
   it("has a courier-ready live tracking baseline", () => {
