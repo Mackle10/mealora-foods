@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./navigation-overrides.css";
 @custom-variant dark (&:is(.dark *));
 @theme inline { --radius-sm:calc(var(--radius) - 4px); --radius-md:calc(var(--radius) - 2px); --radius-lg:var(--radius); --radius-xl:calc(var(--radius) + 4px); --color-background:var(--background); --color-foreground:var(--foreground); --color-card:var(--card); --color-card-foreground:var(--card-foreground); --color-popover:var(--popover); --color-popover-foreground:var(--popover-foreground); --color-primary:var(--primary); --color-primary-foreground:var(--primary-foreground); --color-secondary:var(--secondary); --color-secondary-foreground:var(--secondary-foreground); --color-muted:var(--muted); --color-muted-foreground:var(--muted-foreground); --color-accent:var(--accent); --color-accent-foreground:var(--accent-foreground); --color-border:var(--border); --color-input:var(--input); --color-ring:var(--ring); }
 :root { --radius:1rem; --background:#f4f1e9; --foreground:#07182e; --card:#fffdf7; --card-foreground:#07182e; --popover:#fffdf7; --popover-foreground:#07182e; --primary:#ff6945; --primary-foreground:#fff; --secondary:#dce6ff; --secondary-foreground:#07182e; --muted:#ebe8de; --muted-foreground:#697688; --accent:#dce6ff; --accent-foreground:#07182e; --border:rgba(7,24,46,.14); --input:rgba(7,24,46,.15); --ring:#ff6945; }

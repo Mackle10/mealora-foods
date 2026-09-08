@@ -1,0 +1,67 @@
+/* Navigation interaction layer */
+.soft-backdrop,
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  background: rgba(3, 14, 30, .45);
+  backdrop-filter: blur(9px) saturate(.82);
+  -webkit-backdrop-filter: blur(9px) saturate(.82);
+}
+.soft-backdrop { z-index: 24; }
+.nav-backdrop { z-index: 30; animation: navFadeIn .18s ease-out; }
+.profile-popover { z-index: 25; }
+.mobile-drawer {
+  position: fixed;
+  z-index: 31;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(86vw, 360px);
+  height: 100dvh;
+  padding: 24px 22px;
+  color: #07182e;
+  background: rgba(255, 253, 247, .94);
+  border-left: 1px solid rgba(255, 255, 255, .72);
+  box-shadow: -20px 0 70px rgba(3, 14, 30, .28);
+  backdrop-filter: blur(24px) saturate(1.15);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  animation: drawerIn .24s cubic-bezier(.23, 1, .32, 1);
+}
+.mobile-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 25px;
+  border-bottom: 1px solid rgba(7, 24, 46, .14);
+  color: #07182e;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+.mobile-drawer-head em { color: #ff6945; font-size: 9px; font-style: normal; letter-spacing: .18em; }
+.mobile-drawer-head button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 50%; color: #07182e; background: #e8edf8; }
+.mobile-drawer > button:not(.mobile-drawer-head button),
+.mobile-drawer > a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 21px 3px;
+  border: 0;
+  border-bottom: 1px solid rgba(7, 24, 46, .11);
+  color: #07182e;
+  background: transparent;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 800;
+  text-align: left;
+}
+.mobile-drawer > button:hover, .mobile-drawer > a:hover { color: #ff6945; }
+.mobile-drawer-account { display: grid; gap: 13px; margin-top: auto; padding: 17px; color: #6d7a8c; background: #e8edf8; font-size: 10px; line-height: 1.5; }
+.mobile-drawer-account button { display: flex; align-items: center; justify-content: space-between; padding: 0; border: 0; color: #07182e; background: transparent; font-size: 12px; font-weight: 800; text-align: left; }
+.mobile-drawer-account button:hover { color: #ff6945; }
+@keyframes navFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes drawerIn { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: translateX(0); } }
+@media (min-width: 721px) { .mobile-drawer, .nav-backdrop { display: none; } }
+@media (prefers-reduced-motion: reduce) { .nav-backdrop, .mobile-drawer { animation: none; } }
