@@ -1,67 +1,115 @@
-import { useMemo, useState } from "react";
-import {
-  ArrowRight,
-  Bike,
-  ChevronDown,
-  ChevronRight,
-  Globe2,
-  Heart,
-  MapPin,
-  Menu,
-  PackageCheck,
-  Play,
-  Search,
-  ShoppingBag,
-  Sparkles,
-  Star,
-  Store,
-  Utensils,
-  X,
-  Zap,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
+import { trpc } from "@/lib/trpc";
+import { MapView } from "@/components/Map";
 import { toast } from "sonner";
+import { ArrowRight, Bike, Check, ChevronDown, Globe2, Heart, MapPin, Menu, PackageCheck, Plus, Search, ShoppingBag, Sparkles, Star, Store, Utensils, X, Zap } from "lucide-react";
+import { fallbackCities, fallbackRestaurants, type MenuItem, type Restaurant } from "@shared/catalog";
 
-const img = "/manus-storage/";
-const cities = [
-  { name: "Lagos", country: "Nigeria", dish: "Jollof, suya & more", image: `${img}mealora-dish_8a7e9543.jpg`, accent: "#f36b35" },
-  { name: "Tokyo", country: "Japan", dish: "Ramen, sushi & izakaya", image: `${img}mealora-global-hero_3f739ae9.jpg`, accent: "#6885ff" },
-  { name: "Lisbon", country: "Portugal", dish: "Pastéis & coastal plates", image: `${img}mealora-market_ea07f1eb.jpg`, accent: "#edc35d" },
-];
-const categories = ["All cuisines", "African", "Asian", "European", "Latin American", "Wellness"];
+const imageRoot = "/manus-storage/";
+const cuisines = ["All cuisines", "African", "Asian", "European", "Latin American", "Wellness"];
+
+function formatMoney(cents: number, currency = "USD") {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(cents / 100);
+}
 
 export default function Home() {
+  const { user, isAuthenticated } = useAuth();
   const [location, setLocation] = useState("Accra, Ghana");
-  const [activeCategory, setActiveCategory] = useState("All cuisines");
   const [query, setQuery] = useState("");
-  const [menu, setMenu] = useState(false);
-  const [liked, setLiked] = useState<string[]>([]);
-  const filteredCities = useMemo(() => query ? cities.filter((city) => `${city.name} ${city.country} ${city.dish}`.toLowerCase().includes(query.toLowerCase())) : cities, [query]);
-  const locate = () => { const value = window.prompt("Where should we deliver?", location); if (value?.trim()) { setLocation(value.trim()); toast.success(`Now exploring ${value.trim()}`); } };
-  const notice = (title: string, description: string) => toast(title, { description });
-  const scroll = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  const [activeCuisine, setActiveCuisine] = useState("All cuisines");
+  const [menuRestaurant, setMenuRestaurant] = useState<Restaurant | null>(null);
+  const [cart, setCart] = useState<Array<{ item: MenuItem; quantity: number }>>([]);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [trackingPulse, setTrackingPulse] = useState(0);
+  const [city, setCity] = useState("");
 
-  return <div className="global-site">
-    <div className="topline"><span><span className="live-dot" />MEALORA WORLDWIDE</span><span className="topline-center">One app. Every craving. 40+ cities and counting.</span><button onClick={() => scroll("cities")}>Explore the world <ArrowRight size={13} /></button></div>
-    <header className="global-header"><button className="global-brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}><span className="brand-symbol"><Globe2 size={18} /></span><span>MEALORA<small>FOODS</small></span></button><nav className={menu ? "global-nav open" : "global-nav"}><button onClick={() => scroll("cities")}>Discover</button><button onClick={() => scroll("how")}>How it works</button><button onClick={() => scroll("partners")}>For business</button><button onClick={() => notice("The Mealora journal is coming soon", "Stories, recipes and people from around the table.")}>Journal</button></nav><div className="header-actions"><button className="location-dark" onClick={locate}><MapPin size={15} />{location}<ChevronDown size={14} /></button><button className="header-login" onClick={() => notice("Welcome back", "Sign in and your saved places will appear here.")}>Log in</button><button className="header-signup" onClick={() => notice("Early access is open", "We will let you know when Mealora launches in your city.")}>Get started</button><button className="header-cart" onClick={() => notice("Your bag is waiting", "Add a favourite dish to get started.")}><ShoppingBag size={17} /><b>0</b></button><button className="mobile-menu" onClick={() => setMenu(!menu)}>{menu ? <X size={20} /> : <Menu size={20} />}</button></div></header>
+  const citiesQuery = trpc.marketplace.cities.useQuery();
+  const restaurantsQuery = trpc.marketplace.restaurants.useQuery({ citySlug: city || undefined, cuisine: activeCuisine === "All cuisines" ? undefined : activeCuisine, query: query || undefined });
+  const menuQuery = trpc.marketplace.menu.useQuery({ restaurantId: menuRestaurant?.id ?? 0 }, { enabled: Boolean(menuRestaurant) });
+  const aiSuggest = trpc.ai.suggest.useMutation();
+  const toggleFavorite = trpc.favorites.toggle.useMutation();
+  const tracking = trpc.orders.track.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 5000, refetchOnWindowFocus: false });
+  const createOrder = trpc.orders.create.useMutation();
+
+  const cities = (citiesQuery.data?.length ? citiesQuery.data : fallbackCities);
+  const restaurants = (restaurantsQuery.data?.length ? restaurantsQuery.data : fallbackRestaurants);
+  const menu = menuQuery.data ?? [];
+  const cartTotal = cart.reduce((sum, entry) => sum + entry.item.priceCents * entry.quantity, 0);
+  const cartCount = cart.reduce((sum, entry) => sum + entry.quantity, 0);
+  const trackingStatus = tracking.data;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTrackingPulse((value) => (value + 1) % 4), 3800);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const shownRestaurants = useMemo(() => restaurants.slice(0, 4), [restaurants]);
+
+  const runAiSearch = async () => {
+    if (query.trim().length < 2) {
+      toast("Tell Mealora what you are craving", { description: "Try: something spicy for a date night, or a healthy lunch." });
+      return;
+    }
+    setAiOpen(true);
+    await aiSuggest.mutateAsync({ query: query.trim() }).catch(() => undefined);
+  };
+
+  const setDeliveryLocation = () => {
+    const value = window.prompt("Where should we deliver?", location);
+    if (value?.trim()) { setLocation(value.trim()); toast.success(`Exploring ${value.trim()}`); }
+  };
+
+  const addToCart = (item: MenuItem) => {
+    setCart((current) => {
+      const existing = current.find((entry) => entry.item.id === item.id);
+      return existing ? current.map((entry) => entry.item.id === item.id ? { ...entry, quantity: entry.quantity + 1 } : entry) : [...current, { item, quantity: 1 }];
+    });
+    toast.success(`${item.name} added to your bag`);
+  };
+
+  const checkout = async () => {
+    if (!isAuthenticated) { startLogin(); return; }
+    if (!cart.length) { toast("Your bag is empty", { description: "Choose a dish from a restaurant first." }); return; }
+    const restaurantId = menuRestaurant?.id ?? cart[0].item.restaurantId;
+    try {
+      const result = await createOrder.mutateAsync({ restaurantId, deliveryAddress: location, items: cart.map((entry) => ({ menuItemId: entry.item.id, quantity: entry.quantity })) });
+      setCart([]);
+      toast.success(`Order ${result.orderNumber} created`, { description: "Checkout is ready for your payment gateway keys." });
+    } catch (error) {
+      toast.error("We could not create that order", { description: error instanceof Error ? error.message : "Please try again." });
+    }
+  };
+
+  const saveRestaurant = async (restaurant: Restaurant) => {
+    if (!isAuthenticated) { startLogin(); return; }
+    await toggleFavorite.mutateAsync({ restaurantId: restaurant.id }).then((result) => toast.success(result.saved ? `${restaurant.name} saved` : `${restaurant.name} removed from saved places`)).catch(() => toast.error("Could not update saved places"));
+  };
+
+    return <div className="market-app">
+    <div className="market-topline"><span><span className="live-dot" />MEALORA WORLDWIDE</span><span className="topline-copy">One app. Every craving. Real data, real people, real delivery.</span><button onClick={() => document.getElementById("cities")?.scrollIntoView({ behavior: "smooth" })}>Explore live cities <ArrowRight size={13} /></button></div>
+    <header className="market-header"><button className="market-brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}><span className="brand-orbit"><Globe2 size={17} /></span><span>MEALORA<small>FOODS</small></span></button><nav className="market-nav"><button onClick={() => document.getElementById("cities")?.scrollIntoView({ behavior: "smooth" })}>Discover</button><button onClick={() => document.getElementById("tracking")?.scrollIntoView({ behavior: "smooth" })}>Track an order</button><a href="/partners">For partners</a></nav><div className="market-actions"><button className="delivery-location" onClick={setDeliveryLocation}><MapPin size={14} />{location}<ChevronDown size={13} /></button>{isAuthenticated ? <button className="profile-chip" onClick={() => setProfileOpen(!profileOpen)}><span>{user?.name?.slice(0, 1).toUpperCase() ?? "M"}</span>{user?.name?.split(" ")[0] ?? "Profile"}</button> : <button className="login-button" onClick={() => startLogin()}>Log in</button>}<button className="bag-button" onClick={() => setProfileOpen(!profileOpen)}><ShoppingBag size={17} /><b>{cartCount}</b></button><button className="mobile-menu" onClick={() => toast("Use the links above", { description: "The full navigation is available on wider screens." })}><Menu size={20} /></button></div></header>
+    {profileOpen && <div className="profile-popover"><div className="profile-popover-head"><div className="profile-avatar">{user?.name?.slice(0, 1).toUpperCase() ?? "M"}</div><div><strong>{user?.name ?? "Your Mealora account"}</strong><small>{user?.email ?? "Sign in to unlock orders and saved places"}</small></div></div><a href="/profile">Open profile & order history <ArrowRight size={14} /></a><button onClick={() => setProfileOpen(false)}>Close</button></div>}
 
     <main>
-      <section className="global-hero"><div className="hero-overlay" /><div className="container global-hero-inner"><div className="hero-tag"><span className="hero-tag-dot" />THE WORLD, DELIVERED</div><h1>Find your<br /><em>next favourite.</em></h1><p>One beautiful place for the food, groceries and little everyday joys that make every city worth tasting.</p><div className="hero-search"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search a dish, place or city" /><button onClick={() => scroll("cities")}><ArrowRight size={18} /></button></div><div className="hero-meta"><span><Globe2 size={14} />Live in 40+ cities</span><span><Zap size={14} />Delivery from 15 min</span><span><Star size={14} fill="currentColor" />4.9 average experience</span></div></div><div className="hero-side-note"><span>01 / 03</span><b>Meals without borders</b><small>Curated locally.<br />Delivered globally.</small><button onClick={() => notice("Watch the Mealora story", "A world of food, one thoughtful delivery at a time.")}><Play size={13} fill="currentColor" /></button></div></section>
+      <section className="market-hero"><div className="hero-shade" /><div className="container market-hero-content"><span className="hero-kicker"><span />THE WORLD, DELIVERED</span><h1>Find your<br /><em>next favourite.</em></h1><p>Discover food, groceries and everyday joys from local makers in the cities that move you.</p><div className="ai-search"><Sparkles size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void runAiSearch(); }} placeholder="Ask for anything — try ‘a spicy dinner for two’" /><button onClick={() => void runAiSearch()}>{aiSuggest.isPending ? <span className="spinner" /> : <ArrowRight size={18} />}</button></div>{aiOpen && aiSuggest.data && <div className="ai-results"><div className="ai-results-title"><Sparkles size={14} />Mealora concierge <button onClick={() => setAiOpen(false)}><X size={14} /></button></div><p>{aiSuggest.data.explanation}</p><div className="ai-pills">{aiSuggest.data.meals.map((meal: string) => <button key={meal} onClick={() => { setQuery(meal); setAiOpen(false); }}>{meal}</button>)}</div><div className="ai-cuisine-line">Try cuisines: {aiSuggest.data.cuisines.join(" · ")}</div></div>}<div className="hero-trust"><span><Globe2 size={14} />40+ cities</span><span><Zap size={14} />15 min delivery</span><span><Star size={14} fill="currentColor" />4.9 average experience</span></div></div><div className="hero-side"><span>LIVE / 01</span><strong>Meals without borders</strong><small>Curated locally.<br />Delivered with care.</small><button onClick={() => toast("Meet the Mealora network", { description: "A global marketplace powered by local makers and couriers." })}><PlayIcon /></button></div></section>
+      <div className="world-ticker"><div><span>DELIVERING DELICIOUSNESS</span><i>✦</i><span>FROM LOCAL TO GLOBAL</span><i>✦</i><span>GOOD FOOD HAS NO BORDERS</span><i>✦</i><span>DELIVERING DELICIOUSNESS</span><i>✦</i></div></div>
 
-      <div className="world-strip"><div className="world-strip-track"><span>DELIVERING DELICIOUSNESS</span><i>✦</i><span>FROM LOCAL TO GLOBAL</span><i>✦</i><span>GOOD FOOD HAS NO BORDERS</span><i>✦</i><span>DELIVERING DELICIOUSNESS</span><i>✦</i><span>FROM LOCAL TO GLOBAL</span></div></div>
+      <section className="market-section" id="cities"><div className="container"><div className="section-header"><div><span className="section-kicker">CURATED AROUND YOU</span><h2>Explore a city<br /><em>through its food.</em></h2></div><div className="city-select"><MapPin size={15} /><select value={city} onChange={(event) => setCity(event.target.value)}><option value="">All live cities</option>{cities.map((entry) => <option key={entry.slug} value={entry.slug}>{entry.name}, {entry.country}</option>)}</select><ChevronDown size={14} /></div></div><div className="city-rail">{cities.slice(0, 4).map((entry, index) => <button className={city === entry.slug ? "city-tab active" : "city-tab"} key={entry.slug} onClick={() => setCity(entry.slug)}><span>0{index + 1}</span><strong>{entry.name}</strong><small>{entry.country}</small></button>)}</div><div className="restaurant-grid">{shownRestaurants.map((restaurant) => <article className="restaurant-card" key={restaurant.id}><div className="restaurant-image"><img src={restaurant.imageUrl} alt={restaurant.name} /><span className="open-pill"><span />{restaurant.isOpen ? "Open now" : "Closed"}</span><button className="save-button" onClick={() => void saveRestaurant(restaurant)}><Heart size={17} /></button></div><div className="restaurant-info"><div><span className="restaurant-cuisine">{restaurant.cuisine}</span><h3>{restaurant.name}</h3><p>{restaurant.description}</p></div><div className="restaurant-rating"><Star size={13} fill="currentColor" />{restaurant.rating.toFixed(1)}</div></div><div className="restaurant-meta"><span><Bike size={13} />{restaurant.deliveryMinutes} min</span><span>{restaurant.priceBand} · {restaurant.reviewCount} reviews</span><button onClick={() => setMenuRestaurant(restaurant)}>View menu <ArrowRight size={14} /></button></div></article>)}</div></div></section>
 
-      <section className="intro-section"><div className="container intro-grid"><div><span className="eyebrow-blue">THE MEALORA DIFFERENCE</span><h2>The shortcut<br />to <em>somewhere else.</em></h2></div><div className="intro-copy"><p>Great food is a passport. Mealora makes it easier to discover the dishes, people and places that turn a meal into a memory — right where you are.</p><button className="line-button" onClick={() => scroll("how")}>See how we do it <ArrowRight size={16} /></button></div></div></section>
+      <section className="tracking-section" id="tracking"><div className="container tracking-layout"><div className="tracking-copy"><span className="section-kicker coral">LIVE DELIVERY NETWORK</span><h2>Good things<br /><em>are on the way.</em></h2><p>Track your order from kitchen to doorstep with real-time status updates, courier movement and a clear arrival window.</p><div className="tracking-status"><span className="status-pulse"><span /></span><div><strong>{trackingStatus?.label ?? "Your next order will appear here"}</strong><small>{trackingStatus?.detail ?? "Sign in and place an order to unlock live tracking."}</small></div><b>{trackingStatus ? `${trackingStatus.etaMinutes} min` : "—"}</b></div><div className="tracking-steps"><span className={trackingPulse >= 0 ? "done" : ""}><Check size={12} />Placed</span><span className={trackingPulse >= 1 ? "done" : ""}><Check size={12} />Preparing</span><span className={trackingPulse >= 2 ? "done" : ""}><Bike size={12} />On the way</span><span><PackageCheck size={12} />At your door</span></div></div><div className="map-panel"><MapView initialCenter={{ lat: 5.5722, lng: -0.1938 }} initialZoom={13} className="mealora-map" /><div className="map-overlay"><span className="map-live"><span className="live-dot" />LIVE</span><strong>{trackingStatus?.courierName ?? "Kofi"} is moving toward you</strong><small>Updated just now · {trackingStatus?.etaMinutes ?? 18} min away</small></div><div className="map-route route-a" /><div className="map-route route-b" /><div className="courier-marker"><Bike size={16} /></div></div></div></section>
 
-      <section className="cities-section" id="cities"><div className="container"><div className="section-top"><div><span className="eyebrow-blue">CURATED AROUND THE WORLD</span><h2>Start with a<br /><em>city you love.</em></h2></div><button className="view-all" onClick={() => notice("40+ cities, one Mealora", "Global discovery is rolling out city by city.")}>View all cities <ArrowRight size={16} /></button></div><div className="category-tabs">{categories.map((category) => <button key={category} className={activeCategory === category ? "active" : ""} onClick={() => { setActiveCategory(category); notice(category, "Curated picks will update as more Mealora cities come online."); }}>{category}</button>)}</div><div className="city-grid">{filteredCities.map((city, index) => <article className={`city-card card-${index + 1}`} key={city.name}><img src={city.image} alt={`${city.name} food`} /><div className="city-gradient" /><div className="city-top"><span>MEALORA CITY GUIDE</span><button onClick={() => setLiked((current) => current.includes(city.name) ? current.filter((item) => item !== city.name) : [...current, city.name])} className={liked.includes(city.name) ? "liked" : ""}><Heart size={17} fill={liked.includes(city.name) ? "currentColor" : "none"} /></button></div><div className="city-content"><span className="city-country">{city.country}</span><h3>{city.name}</h3><p>{city.dish}</p><button onClick={() => notice(`Exploring ${city.name}`, "Showing the flavours that define this city.")}>Explore city <ArrowRight size={15} /></button></div></article>)}{!filteredCities.length && <div className="no-results">No city found yet. Try Lagos, Tokyo or Lisbon.</div>}</div></div></section>
+      <section className="how-section"><div className="container how-grid"><div><span className="section-kicker">THE MEALORA WAY</span><h2>A marketplace<br />with a <em>point of view.</em></h2><p>Real restaurants. Real couriers. Real-time data. Designed so the magic of a global marketplace still feels human.</p><a className="dark-link" href="/partners">Join the network <ArrowRight size={15} /></a></div><div className="how-cards"><div><span>01</span><Globe2 size={22} /><h3>Know every city</h3><p>Local partners and city guides, not generic listings.</p></div><div><span>02</span><Sparkles size={22} /><h3>Search like a human</h3><p>Tell our concierge what you are in the mood for.</p></div><div><span>03</span><Bike size={22} /><h3>See every mile</h3><p>Clear updates from accepted order to front door.</p></div></div></div></section>
 
-      <section className="how-global" id="how"><div className="container how-global-inner"><div className="how-copy"><span className="eyebrow-coral">FROM DOORSTEP TO DESTINATION</span><h2>We bring the<br /><em>whole world</em><br />closer.</h2><p>Behind every order is a living network of local makers, thoughtful couriers and curious people. That is the Mealora way.</p><button className="coral-button" onClick={() => notice("The Mealora way", "Local knowledge, global standards, human delivery.")}>Our approach <ArrowRight size={16} /></button></div><div className="how-steps"><div className="how-step"><span>01</span><div className="how-step-icon"><MapPin size={21} /></div><div><h3>Set your coordinates</h3><p>Tell us where you are and we will map the good stuff around you.</p></div></div><div className="how-step"><span>02</span><div className="how-step-icon"><Sparkles size={21} /></div><div><h3>Follow your curiosity</h3><p>Browse local legends, new openings and flavours from further afield.</p></div></div><div className="how-step"><span>03</span><div className="how-step-icon"><Bike size={21} /></div><div><h3>We move it with care</h3><p>Real-time tracking, fair delivery and a little more joy at the door.</p></div></div></div></div></section>
-
-      <section className="live-section"><div className="container live-grid"><div className="live-board"><div className="live-board-header"><span><span className="live-dot coral" />LIVE DELIVERY</span><span>MEALORA / 09:42</span></div><div className="route-line"><div className="route-point start"><span>01</span></div><div className="route-path"><i /><i /><i /><i /><i /></div><div className="route-point end"><span>02</span></div></div><div className="route-labels"><div><small>FROM</small><strong>Kora Kitchen</strong><span>Smoky jollof · Lagos</span></div><div><small>TO</small><strong>Your table</strong><span>Arriving in 18 min</span></div></div><div className="live-card-footer"><span><Bike size={16} /> Kofi is on the way</span><button onClick={() => notice("Live tracking", "Your rider is on the final stretch.")}>Track order <ArrowRight size={14} /></button></div></div><div className="live-copy"><span className="eyebrow-blue">A LITTLE MORE CERTAINTY</span><h2>Good things<br /><em>are on the way.</em></h2><p>From the first tap to the last mile, we keep the experience clear, considered and distinctly human.</p><div className="stat-row"><div><strong>15<span>min</span></strong><small>fastest delivery</small></div><div><strong>40<span>+</span></strong><small>cities to explore</small></div><div><strong>4.9<span>★</span></strong><small>average rating</small></div></div></div></div></section>
-
-      <section className="partners-global" id="partners"><div className="container partner-global-grid"><div className="partner-global-copy"><span className="eyebrow-coral">FOR MAKERS & MOVERS</span><h2>Your place<br />in the <em>world.</em></h2><p>Bring your menu, store or route to a platform designed for the next generation of global commerce.</p><div className="partner-global-links"><button onClick={() => notice("Restaurant partnerships", "Bring your menu to new tables around the world.")}><span><Utensils size={19} />List your restaurant</span><ChevronRight size={18} /></button><button onClick={() => notice("Delivery partnerships", "Make your city move with Mealora.")}><span><Bike size={19} />Become a courier</span><ChevronRight size={18} /></button><button onClick={() => notice("Business solutions", "A smarter way to deliver more than food.")}><span><Store size={19} />Work with Mealora</span><ChevronRight size={18} /></button></div></div><div className="partner-orbit"><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-core"><Globe2 size={54} strokeWidth={1} /><span>GOOD<br />TRAVELS</span></div><span className="orbit-label l1">LOCAL</span><span className="orbit-label l2">CURIOUS</span><span className="orbit-label l3">CONNECTED</span></div></div></section>
-
-      <section className="app-section"><div className="container app-grid"><div><span className="eyebrow-blue">THE APP FOR EVERYWHERE</span><h2>Carry the<br /><em>world with you.</em></h2><p>Save your favourite places, follow every delivery and keep a little piece of every city close.</p><div className="app-buttons"><button onClick={() => notice("App download", "iOS and Android downloads are coming soon.")}>Download the app <ArrowRight size={16} /></button><button className="store-button" onClick={() => notice("App store preview", "The Mealora app is being prepared for launch.")}><span>Available soon on</span><strong>App Store & Google Play</strong></button></div></div><div className="phone-stack"><div className="phone phone-back"><div className="phone-screen map-screen"><span className="map-grid" /><span className="map-pin p1" /><span className="map-pin p2" /><span className="map-pin p3" /></div></div><div className="phone phone-front"><div className="phone-screen order-screen"><small>ON THE WAY</small><strong>Good food<br />finds you.</strong><div className="mini-order"><img src={`${img}mealora-dish_8a7e9543.jpg`} alt="Dish" /><span>Kora Kitchen<br /><b>Arriving in 18 min</b></span></div></div></div></div></div></section>
+      <section className="partners-cta"><div className="container partners-layout"><div><span className="section-kicker">FOR MAKERS & MOVERS</span><h2>Your place<br />in the <em>world.</em></h2><p>Restaurants, couriers and businesses get the tools to grow with a marketplace built for global ambition.</p><a href="/partners" className="coral-button">Open partner hub <ArrowRight size={16} /></a></div><div className="partner-orbit"><div className="orbit-line one" /><div className="orbit-line two" /><div className="orbit-center"><Globe2 size={45} /><span>GOOD<br />TRAVELS</span></div><span className="orbit-tag tag-one">LOCAL</span><span className="orbit-tag tag-two">CURIOUS</span><span className="orbit-tag tag-three">CONNECTED</span></div></div></section>
     </main>
 
-    <footer className="global-footer"><div className="container footer-main"><div><button className="global-brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}><span className="brand-symbol"><Globe2 size={18} /></span><span>MEALORA<small>FOODS</small></span></button><p>The world's local food<br />marketplace.</p></div><div className="footer-column"><b>Explore</b><a href="#cities">Cities</a><a href="#how">How it works</a><a href="#partners">For business</a><a href="#">Journal</a></div><div className="footer-column"><b>Company</b><a href="#">About Mealora</a><a href="#">Careers</a><a href="#">Sustainability</a><a href="#">Contact</a></div><div className="footer-column"><b>Follow along</b><a href="#">Instagram</a><a href="#">TikTok</a><a href="#">LinkedIn</a><a href="#">X / Twitter</a></div></div><div className="container footer-bottom"><span>© 2026 MEALORA FOODS</span><span>Made for curious people, everywhere.</span><span>Privacy &nbsp;·&nbsp; Terms</span></div></footer>
+    {menuRestaurant && <div className="modal-backdrop" onClick={() => setMenuRestaurant(null)}><section className="menu-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setMenuRestaurant(null)}><X size={17} /></button><div className="menu-modal-head"><img src={menuRestaurant.imageUrl} alt={menuRestaurant.name} /><div><span>{menuRestaurant.cuisine}</span><h2>{menuRestaurant.name}</h2><p>{menuRestaurant.description}</p></div></div><div className="menu-list">{menu.length ? menu.map((item) => <div className="menu-item" key={item.id}><img src={item.imageUrl} alt={item.name} /><div><strong>{item.name}</strong><p>{item.description}</p><span>{formatMoney(item.priceCents)}</span></div><button onClick={() => addToCart(item)}><Plus size={15} /></button></div>) : <div className="menu-loading">Loading the live menu…</div>}</div><div className="menu-modal-foot"><span>{cartCount} items · {formatMoney(cartTotal)}</span><button onClick={() => void checkout()}>{createOrder.isPending ? "Creating order…" : "Checkout"}<ArrowRight size={15} /></button></div></section></div>}
+
+    <footer className="market-footer"><div className="container footer-main"><div><button className="market-brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}><span className="brand-orbit"><Globe2 size={17} /></span><span>MEALORA<small>FOODS</small></span></button><p>The world's local food<br />marketplace.</p></div><div><b>Explore</b><a href="#cities">Cities & cuisines</a><a href="#tracking">Track an order</a><a href="/profile">Your profile</a></div><div><b>Partner</b><a href="/partners">Restaurant partners</a><a href="/partners">Delivery partners</a><a href="/partners">Business solutions</a></div><div><b>System status</b><span className="status-ok"><span />All systems operational</span><small>AI search · Payments · Tracking</small></div></div><div className="container footer-bottom"><span>© 2026 MEALORA FOODS</span><span>Made for curious people, everywhere.</span><span>Privacy · Terms</span></div></footer>
   </div>;
 }
+
+function PlayIcon() { return <span className="play-icon">▶</span>; }
