@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, cities, favorites, menuItems, orderItems, orders, partnerApplications, restaurants, users } from "../drizzle/schema";
+import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurants, signupRequests, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -34,6 +34,20 @@ export async function getUserByOpenId(openId: string) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result[0];
+}
+
+export async function createSignupRequest(input: { contactType: "email" | "phone"; contact: string; name: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const inserted = await db.insert(signupRequests).values(input).$returningId();
+  return { id: inserted[0]?.id ?? 0, status: "pending" as const };
+}
+
+export async function updateUserProfile(userId: number, input: { name: string; email?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  await db.update(users).set({ name: input.name, email: input.email || null }).where(eq(users.id, userId));
+  return { success: true as const };
 }
 
 export async function getCitiesFromDb() {
@@ -70,13 +84,34 @@ export async function toggleFavorite(userId: number, restaurantId: number) {
   return { saved: true };
 }
 
+export async function getAddressesForUser(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(deliveryAddresses).where(eq(deliveryAddresses.userId, userId)).orderBy(desc(deliveryAddresses.isDefault), desc(deliveryAddresses.updatedAt));
+}
+
+export async function saveAddressForUser(input: { userId: number; label: string; recipientName: string; phone: string; address: string; city: string; instructions?: string; isDefault?: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  if (input.isDefault) await db.update(deliveryAddresses).set({ isDefault: 0 }).where(eq(deliveryAddresses.userId, input.userId));
+  const inserted = await db.insert(deliveryAddresses).values({ ...input, isDefault: input.isDefault ? 1 : 0 }).$returningId();
+  return { id: inserted[0]?.id ?? 0 };
+}
+
+export async function deleteAddressForUser(userId: number, addressId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  await db.delete(deliveryAddresses).where(and(eq(deliveryAddresses.id, addressId), eq(deliveryAddresses.userId, userId)));
+  return { success: true as const };
+}
+
 export async function getOrdersForUser(userId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(orders).where(eq(orders.userId, userId)).orderBy(desc(orders.createdAt));
 }
 
-export async function createOrderForUser(input: { userId: number; restaurantId: number; deliveryAddress: string; items: Array<{ menuItemId: number; quantity: number }> }) {
+export async function createOrderForUser(input: { userId: number; restaurantId: number; deliveryAddress: string; paymentMethod: "cash_on_delivery" | "mtn_momo" | "airtel_money" | "card"; mobileMoneyPhone?: string; items: Array<{ menuItemId: number; quantity: number }> }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not configured");
   const ids = input.items.map(item => item.menuItemId);
@@ -86,11 +121,12 @@ export async function createOrderForUser(input: { userId: number; restaurantId: 
   const deliveryFeeCents = subtotalCents >= 35000 ? 0 : 3000;
   const totalCents = subtotalCents + deliveryFeeCents;
   const orderNumber = `MEA-${Date.now().toString(36).toUpperCase()}`;
-  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "UGX", deliveryAddress: input.deliveryAddress, courierName: "Moses", courierLatE6: 326600, courierLngE6: 32582500, etaMinutes: 24 }).$returningId();
+  const mobileMoneyReference = input.paymentMethod === "mtn_momo" || input.paymentMethod === "airtel_money" ? `MM-${Date.now().toString(36).toUpperCase()}` : undefined;
+  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "UGX", paymentMethod: input.paymentMethod, paymentStatus: input.paymentMethod === "cash_on_delivery" ? "pending" : "initiated", mobileMoneyPhone: input.mobileMoneyPhone, mobileMoneyReference, deliveryAddress: input.deliveryAddress, courierName: "Moses", courierLatE6: 326600, courierLngE6: 32582500, etaMinutes: 24 }).$returningId();
   const orderId = inserted[0]?.id;
   if (!orderId) throw new Error("Order could not be created");
   await db.insert(orderItems).values(input.items.map(item => { const menuItem = menu.find(candidate => candidate.id === item.menuItemId)!; return { orderId, menuItemId: menuItem.id, itemName: menuItem.name, unitPriceCents: menuItem.priceCents, quantity: item.quantity }; }));
-  return { orderId, orderNumber, totalCents, currency: "UGX", paymentStatus: "payment_setup_required" as const };
+  return { orderId, orderNumber, totalCents, currency: "UGX", paymentMethod: input.paymentMethod, mobileMoneyReference, paymentStatus: input.paymentMethod === "cash_on_delivery" ? "pending" as const : "mobile_money_initiated" as const };
 }
 
 export async function createPartnerApplication(input: { userId: number; applicationType: "restaurant" | "courier" | "business"; businessName: string; contactEmail: string; city: string; details: string }) {

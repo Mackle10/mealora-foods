@@ -8,6 +8,20 @@
       "when": 1788875898589,
       "tag": "0000_solid_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1788880178568,
+      "tag": "0001_fine_bug",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788880243448,
+      "tag": "0002_little_firebrand",
+      "breakpoints": true
     }
   ]
 }

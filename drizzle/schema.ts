@@ -12,6 +12,15 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const signupRequests = mysqlTable("signupRequests", {
+  id: int("id").autoincrement().primaryKey(),
+  contactType: mysqlEnum("contactType", ["email", "phone"]).notNull(),
+  contact: varchar("contact", { length: 320 }).notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  status: mysqlEnum("status", ["pending", "started"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const cities = mysqlTable("cities", {
   id: int("id").autoincrement().primaryKey(),
   slug: varchar("slug", { length: 80 }).notNull().unique(),
@@ -63,6 +72,20 @@ export const favorites = mysqlTable("favorites", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => ({ userRestaurantUnique: uniqueIndex("favorites_user_restaurant_unique").on(table.userId, table.restaurantId) }));
 
+export const deliveryAddresses = mysqlTable("deliveryAddresses", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  label: varchar("label", { length: 60 }).notNull(),
+  recipientName: varchar("recipientName", { length: 160 }).notNull(),
+  phone: varchar("phone", { length: 40 }).notNull(),
+  address: text("address").notNull(),
+  city: varchar("city", { length: 120 }).notNull(),
+  instructions: text("instructions"),
+  isDefault: int("isDefault").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => ({ userLabelUnique: uniqueIndex("delivery_addresses_user_label_unique").on(table.userId, table.label) }));
+
 export const orders = mysqlTable("orders", {
   id: int("id").autoincrement().primaryKey(),
   orderNumber: varchar("orderNumber", { length: 40 }).notNull().unique(),
@@ -73,6 +96,10 @@ export const orders = mysqlTable("orders", {
   deliveryFeeCents: int("deliveryFeeCents").notNull(),
   totalCents: int("totalCents").notNull(),
   currency: varchar("currency", { length: 8 }).default("USD").notNull(),
+  paymentMethod: mysqlEnum("paymentMethod", ["cash_on_delivery", "mtn_momo", "airtel_money", "card"]).default("cash_on_delivery").notNull(),
+  paymentStatus: mysqlEnum("paymentStatus", ["pending", "initiated", "paid", "failed"]).default("pending").notNull(),
+  mobileMoneyPhone: varchar("mobileMoneyPhone", { length: 40 }),
+  mobileMoneyReference: varchar("mobileMoneyReference", { length: 120 }),
   deliveryAddress: text("deliveryAddress").notNull(),
   courierName: varchar("courierName", { length: 120 }),
   courierPhone: varchar("courierPhone", { length: 40 }),

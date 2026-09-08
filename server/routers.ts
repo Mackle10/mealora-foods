@@ -4,10 +4,11 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
-import { createOrderForUser, createPartnerApplication, getCitiesFromDb, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getRestaurantsFromDb, toggleFavorite } from "./db";
+import { createOrderForUser, createPartnerApplication, createSignupRequest, deleteAddressForUser, getAddressesForUser, getCitiesFromDb, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getRestaurantsFromDb, saveAddressForUser, toggleFavorite, updateUserProfile } from "./db";
 import { and, eq } from "drizzle-orm";
 import { orders } from "../drizzle/schema";
 import { z } from "zod";
+import { isMobileMoneyPayment } from "./payment-readiness";
 
 const textFromResponse = (content: unknown) => {
   if (typeof content === "string") return content;
@@ -24,6 +25,8 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+    registerInterest: publicProcedure.input(z.object({ contactType: z.enum(["email", "phone"]), contact: z.string().min(5).max(320), name: z.string().min(2).max(160) })).mutation(({ input }) => createSignupRequest(input)),
+    updateProfile: protectedProcedure.input(z.object({ name: z.string().min(2).max(160), email: z.string().email().optional() })).mutation(({ ctx, input }) => updateUserProfile(ctx.user.id, input)),
   }),
   marketplace: router({
     cities: publicProcedure.query(async () => {
@@ -72,9 +75,17 @@ export const appRouter = router({
     list: protectedProcedure.query(({ ctx }) => getFavoritesForUser(ctx.user.id)),
     toggle: protectedProcedure.input(z.object({ restaurantId: z.number() })).mutation(({ ctx, input }) => toggleFavorite(ctx.user.id, input.restaurantId)),
   }),
+  addresses: router({
+    list: protectedProcedure.query(({ ctx }) => getAddressesForUser(ctx.user.id)),
+    save: protectedProcedure.input(z.object({ label: z.string().min(2).max(60), recipientName: z.string().min(2).max(160), phone: z.string().min(7).max(40), address: z.string().min(5), city: z.string().min(2).max(120), instructions: z.string().max(500).optional(), isDefault: z.boolean().optional() })).mutation(({ ctx, input }) => saveAddressForUser({ ...input, userId: ctx.user.id })),
+    remove: protectedProcedure.input(z.object({ addressId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteAddressForUser(ctx.user.id, input.addressId)),
+  }),
   orders: router({
     list: protectedProcedure.query(({ ctx }) => getOrdersForUser(ctx.user.id)),
-    create: protectedProcedure.input(z.object({ restaurantId: z.number(), deliveryAddress: z.string().min(5), items: z.array(z.object({ menuItemId: z.number(), quantity: z.number().int().min(1).max(20) })).min(1) })).mutation(({ ctx, input }) => createOrderForUser({ ...input, userId: ctx.user.id })),
+    create: protectedProcedure.input(z.object({ restaurantId: z.number(), deliveryAddress: z.string().min(5), paymentMethod: z.enum(["cash_on_delivery", "mtn_momo", "airtel_money", "card"]), mobileMoneyPhone: z.string().min(7).max(40).optional(), items: z.array(z.object({ menuItemId: z.number(), quantity: z.number().int().min(1).max(20) })).min(1) })).mutation(({ ctx, input }) => {
+      if (isMobileMoneyPayment(input.paymentMethod) && !input.mobileMoneyPhone) throw new Error("Enter the Mobile Money phone number to continue");
+      return createOrderForUser({ ...input, userId: ctx.user.id });
+    }),
     track: protectedProcedure.input(z.object({ orderId: z.number().optional() }).optional()).query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db || !input?.orderId) return fallbackTracking;
