@@ -3,8 +3,8 @@ import { fallbackCities, fallbackMenu, fallbackRestaurants, fallbackTracking } f
 import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
-import { createOrderForUser, createPartnerApplication, createSignupRequest, deleteAddressForUser, getAddressesForUser, getCitiesFromDb, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getRestaurantsFromDb, saveAddressForUser, toggleFavorite, updateUserProfile } from "./db";
+import { adminProcedure, publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { createOrderForUser, createPartnerApplication, createSignupRequest, deleteAddressForUser, getAddressesForUser, getCitiesFromDb, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getReorderForUser, getRestaurantsFromDb, saveAddressForUser, toggleFavorite, updateOrderState, updateUserProfile } from "./db";
 import { and, eq } from "drizzle-orm";
 import { orders } from "../drizzle/schema";
 import { z } from "zod";
@@ -26,7 +26,7 @@ export const appRouter = router({
       return { success: true } as const;
     }),
     registerInterest: publicProcedure.input(z.object({ contactType: z.enum(["email", "phone"]), contact: z.string().min(5).max(320), name: z.string().min(2).max(160) })).mutation(({ input }) => createSignupRequest(input)),
-    updateProfile: protectedProcedure.input(z.object({ name: z.string().min(2).max(160), email: z.string().email().optional() })).mutation(({ ctx, input }) => updateUserProfile(ctx.user.id, input)),
+    updateProfile: protectedProcedure.input(z.object({ name: z.string().min(2).max(160), email: z.string().email().optional(), phone: z.string().min(7).max(40).optional() })).mutation(({ ctx, input }) => updateUserProfile(ctx.user.id, input)),
   }),
   marketplace: router({
     cities: publicProcedure.query(async () => {
@@ -86,6 +86,8 @@ export const appRouter = router({
       if (isMobileMoneyPayment(input.paymentMethod) && !input.mobileMoneyPhone) throw new Error("Enter the Mobile Money phone number to continue");
       return createOrderForUser({ ...input, userId: ctx.user.id });
     }),
+    reorder: protectedProcedure.input(z.object({ orderId: z.number().int().positive() })).mutation(async ({ ctx, input }) => createOrderForUser({ ...(await getReorderForUser(ctx.user.id, input.orderId)), userId: ctx.user.id })),
+    updateStatus: adminProcedure.input(z.object({ orderId: z.number().int().positive(), status: z.enum(["placed", "confirmed", "preparing", "picked_up", "on_the_way", "delivered", "cancelled"]).optional(), paymentStatus: z.enum(["pending", "initiated", "paid", "failed"]).optional() })).mutation(({ input }) => updateOrderState(input)),
     track: protectedProcedure.input(z.object({ orderId: z.number().optional() }).optional()).query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db || !input?.orderId) return fallbackTracking;

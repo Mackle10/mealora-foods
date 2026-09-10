@@ -1,7 +1,8 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurants, signupRequests, users } from "../drizzle/schema";
+import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurants, signupRequests, smsNotifications, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { getOrderNotificationEvent, sendSms } from "./sms";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -43,10 +44,10 @@ export async function createSignupRequest(input: { contactType: "email" | "phone
   return { id: inserted[0]?.id ?? 0, status: "pending" as const };
 }
 
-export async function updateUserProfile(userId: number, input: { name: string; email?: string }) {
+export async function updateUserProfile(userId: number, input: { name: string; email?: string; phone?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not configured");
-  await db.update(users).set({ name: input.name, email: input.email || null }).where(eq(users.id, userId));
+  await db.update(users).set({ name: input.name, email: input.email || null, phone: input.phone || null }).where(eq(users.id, userId));
   return { success: true as const };
 }
 
@@ -120,9 +121,10 @@ export async function createOrderForUser(input: { userId: number; restaurantId: 
   const subtotalCents = input.items.reduce((sum, item) => sum + (menu.find(menuItem => menuItem.id === item.menuItemId)?.priceCents ?? 0) * item.quantity, 0);
   const deliveryFeeCents = subtotalCents >= 35000 ? 0 : 3000;
   const totalCents = subtotalCents + deliveryFeeCents;
+  const customer = (await db.select({ phone: users.phone }).from(users).where(eq(users.id, input.userId)).limit(1))[0];
   const orderNumber = `MEA-${Date.now().toString(36).toUpperCase()}`;
   const mobileMoneyReference = input.paymentMethod === "mtn_momo" || input.paymentMethod === "airtel_money" ? `MM-${Date.now().toString(36).toUpperCase()}` : undefined;
-  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "UGX", paymentMethod: input.paymentMethod, paymentStatus: input.paymentMethod === "cash_on_delivery" ? "pending" : "initiated", mobileMoneyPhone: input.mobileMoneyPhone, mobileMoneyReference, deliveryAddress: input.deliveryAddress, courierName: "Moses", courierLatE6: 326600, courierLngE6: 32582500, etaMinutes: 24 }).$returningId();
+  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "UGX", paymentMethod: input.paymentMethod, paymentStatus: input.paymentMethod === "cash_on_delivery" ? "pending" : "initiated", mobileMoneyPhone: input.mobileMoneyPhone, mobileMoneyReference, smsPhone: input.mobileMoneyPhone ?? customer?.phone, deliveryAddress: input.deliveryAddress, courierName: "Moses", courierLatE6: 326600, courierLngE6: 32582500, etaMinutes: 24 }).$returningId();
   const orderId = inserted[0]?.id;
   if (!orderId) throw new Error("Order could not be created");
   await db.insert(orderItems).values(input.items.map(item => { const menuItem = menu.find(candidate => candidate.id === item.menuItemId)!; return { orderId, menuItemId: menuItem.id, itemName: menuItem.name, unitPriceCents: menuItem.priceCents, quantity: item.quantity }; }));
@@ -134,4 +136,34 @@ export async function createPartnerApplication(input: { userId: number; applicat
   if (!db) throw new Error("Database is not configured");
   const inserted = await db.insert(partnerApplications).values(input).$returningId();
   return { id: inserted[0]?.id ?? 0, status: "new" as const };
+}
+
+
+export async function getReorderForUser(userId: number, orderId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const order = (await db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1))[0];
+  if (!order) throw new Error("Order not found");
+  const items = await db.select({ menuItemId: orderItems.menuItemId, quantity: orderItems.quantity }).from(orderItems).where(eq(orderItems.orderId, orderId));
+  return { restaurantId: order.restaurantId, deliveryAddress: order.deliveryAddress, paymentMethod: "cash_on_delivery" as const, items };
+}
+
+export async function updateOrderState(input: { orderId: number; status?: "placed" | "confirmed" | "preparing" | "picked_up" | "on_the_way" | "delivered" | "cancelled"; paymentStatus?: "pending" | "initiated" | "paid" | "failed" }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const order = (await db.select().from(orders).where(eq(orders.id, input.orderId)).limit(1))[0];
+  if (!order) throw new Error("Order not found");
+  await db.update(orders).set({ status: input.status ?? order.status, paymentStatus: input.paymentStatus ?? order.paymentStatus }).where(eq(orders.id, input.orderId));
+  const event = getOrderNotificationEvent({ previousPaymentStatus: order.paymentStatus, nextPaymentStatus: input.paymentStatus ?? order.paymentStatus, previousStatus: order.status, nextStatus: input.status ?? order.status });
+  if (!event) return { success: true as const, smsStatus: "not_required" as const };
+  const eventKey = `${order.id}-${event}`;
+  const existing = await db.select({ id: smsNotifications.id }).from(smsNotifications).where(eq(smsNotifications.eventKey, eventKey)).limit(1);
+  if (existing[0]) return { success: true as const, smsStatus: "already_sent" as const };
+  const phone = order.smsPhone ?? order.mobileMoneyPhone;
+  if (!phone) return { success: true as const, smsStatus: "missing_phone" as const };
+  const message = event === "paid" ? `MEALORA: Payment received for ${order.orderNumber}. We are preparing your order.` : `MEALORA: Order ${order.orderNumber} has been delivered. Enjoy your meal!`;
+  await db.insert(smsNotifications).values({ orderId: order.id, eventKey, phone, message, status: "queued" });
+  const result = await sendSms({ to: phone, message });
+  await db.update(smsNotifications).set({ status: result.sent ? "sent" : "failed", providerReference: result.providerReference, errorMessage: result.errorMessage, sentAt: result.sent ? new Date() : undefined }).where(eq(smsNotifications.eventKey, eventKey));
+  return { success: true as const, smsStatus: result.sent ? "sent" as const : "queued" as const };
 }

@@ -5,6 +5,7 @@ export const users = mysqlTable("users", {
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 40 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -100,6 +101,7 @@ export const orders = mysqlTable("orders", {
   paymentStatus: mysqlEnum("paymentStatus", ["pending", "initiated", "paid", "failed"]).default("pending").notNull(),
   mobileMoneyPhone: varchar("mobileMoneyPhone", { length: 40 }),
   mobileMoneyReference: varchar("mobileMoneyReference", { length: 120 }),
+  smsPhone: varchar("smsPhone", { length: 40 }),
   deliveryAddress: text("deliveryAddress").notNull(),
   courierName: varchar("courierName", { length: 120 }),
   courierPhone: varchar("courierPhone", { length: 40 }),
@@ -119,6 +121,19 @@ export const orderItems = mysqlTable("orderItems", {
   itemName: varchar("itemName", { length: 160 }).notNull(),
   unitPriceCents: int("unitPriceCents").notNull(),
   quantity: int("quantity").notNull(),
+});
+
+export const smsNotifications = mysqlTable("smsNotifications", {
+  id: int("id").autoincrement().primaryKey(),
+  orderId: int("orderId").notNull(),
+  eventKey: varchar("eventKey", { length: 80 }).notNull().unique(),
+  phone: varchar("phone", { length: 40 }).notNull(),
+  message: text("message").notNull(),
+  status: mysqlEnum("status", ["queued", "sent", "failed"]).default("queued").notNull(),
+  providerReference: varchar("providerReference", { length: 160 }),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  sentAt: timestamp("sentAt"),
 });
 
 export const partnerApplications = mysqlTable("partnerApplications", {
