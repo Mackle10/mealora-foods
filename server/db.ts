@@ -1,8 +1,9 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurants, signupRequests, smsNotifications, users } from "../drizzle/schema";
+import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurantReviews, restaurants, signupRequests, smsNotifications, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { getOrderNotificationEvent, sendSms } from "./sms";
+import { calculateNextRatingBasis, canReviewOrder } from "./reviews";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -112,7 +113,13 @@ export async function getOrdersForUser(userId: number) {
   return db.select().from(orders).where(eq(orders.userId, userId)).orderBy(desc(orders.createdAt));
 }
 
-export async function createOrderForUser(input: { userId: number; restaurantId: number; deliveryAddress: string; paymentMethod: "cash_on_delivery" | "mtn_momo" | "airtel_money" | "card"; mobileMoneyPhone?: string; items: Array<{ menuItemId: number; quantity: number }> }) {
+export async function getCourierOrders() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(orders).where(inArray(orders.status, ["placed", "confirmed", "preparing", "picked_up", "on_the_way"])).orderBy(desc(orders.updatedAt));
+}
+
+export async function createOrderForUser(input: { userId: number; restaurantId: number; deliveryAddress: string; specialInstructions?: string; paymentMethod: "cash_on_delivery" | "mtn_momo" | "airtel_money" | "card"; mobileMoneyPhone?: string; items: Array<{ menuItemId: number; quantity: number }> }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not configured");
   const ids = input.items.map(item => item.menuItemId);
@@ -124,7 +131,7 @@ export async function createOrderForUser(input: { userId: number; restaurantId: 
   const customer = (await db.select({ phone: users.phone }).from(users).where(eq(users.id, input.userId)).limit(1))[0];
   const orderNumber = `MEA-${Date.now().toString(36).toUpperCase()}`;
   const mobileMoneyReference = input.paymentMethod === "mtn_momo" || input.paymentMethod === "airtel_money" ? `MM-${Date.now().toString(36).toUpperCase()}` : undefined;
-  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "UGX", paymentMethod: input.paymentMethod, paymentStatus: input.paymentMethod === "cash_on_delivery" ? "pending" : "initiated", mobileMoneyPhone: input.mobileMoneyPhone, mobileMoneyReference, smsPhone: input.mobileMoneyPhone ?? customer?.phone, deliveryAddress: input.deliveryAddress, courierName: "Moses", courierLatE6: 326600, courierLngE6: 32582500, etaMinutes: 24 }).$returningId();
+  const inserted = await db.insert(orders).values({ orderNumber, userId: input.userId, restaurantId: input.restaurantId, status: "placed", subtotalCents, deliveryFeeCents, totalCents, currency: "UGX", paymentMethod: input.paymentMethod, paymentStatus: input.paymentMethod === "cash_on_delivery" ? "pending" : "initiated", mobileMoneyPhone: input.mobileMoneyPhone, mobileMoneyReference, smsPhone: input.mobileMoneyPhone ?? customer?.phone, deliveryAddress: input.deliveryAddress, specialInstructions: input.specialInstructions, courierName: "Moses", courierLatE6: 326600, courierLngE6: 32582500, etaMinutes: 24 }).$returningId();
   const orderId = inserted[0]?.id;
   if (!orderId) throw new Error("Order could not be created");
   await db.insert(orderItems).values(input.items.map(item => { const menuItem = menu.find(candidate => candidate.id === item.menuItemId)!; return { orderId, menuItemId: menuItem.id, itemName: menuItem.name, unitPriceCents: menuItem.priceCents, quantity: item.quantity }; }));
@@ -144,8 +151,30 @@ export async function getReorderForUser(userId: number, orderId: number) {
   if (!db) throw new Error("Database is not configured");
   const order = (await db.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.userId, userId))).limit(1))[0];
   if (!order) throw new Error("Order not found");
-  const items = await db.select({ menuItemId: orderItems.menuItemId, quantity: orderItems.quantity }).from(orderItems).where(eq(orderItems.orderId, orderId));
-  return { restaurantId: order.restaurantId, deliveryAddress: order.deliveryAddress, paymentMethod: "cash_on_delivery" as const, items };
+  const items = await db.select({ menuItemId: orderItems.menuItemId, itemName: orderItems.itemName, unitPriceCents: orderItems.unitPriceCents, quantity: orderItems.quantity }).from(orderItems).where(eq(orderItems.orderId, orderId));
+  return { restaurantId: order.restaurantId, deliveryAddress: order.deliveryAddress, specialInstructions: order.specialInstructions ?? undefined, paymentMethod: "cash_on_delivery" as const, items };
+}
+
+export async function getReviewsForRestaurant(restaurantId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(restaurantReviews).where(eq(restaurantReviews.restaurantId, restaurantId)).orderBy(desc(restaurantReviews.createdAt)).limit(20);
+}
+
+export async function createRestaurantReview(input: { userId: number; restaurantId: number; orderId: number; rating: number; comment?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const order = (await db.select().from(orders).where(and(eq(orders.id, input.orderId), eq(orders.userId, input.userId), eq(orders.restaurantId, input.restaurantId))).limit(1))[0];
+  if (!order || !canReviewOrder(order.status)) throw new Error("Reviews unlock after this order is delivered");
+  const existing = await db.select({ id: restaurantReviews.id }).from(restaurantReviews).where(eq(restaurantReviews.orderId, input.orderId)).limit(1);
+  if (existing[0]) throw new Error("You already reviewed this order");
+  await db.insert(restaurantReviews).values(input);
+  const restaurant = (await db.select({ ratingBasis: restaurants.ratingBasis, reviewCount: restaurants.reviewCount }).from(restaurants).where(eq(restaurants.id, input.restaurantId)).limit(1))[0];
+  if (restaurant) {
+    const nextRating = calculateNextRatingBasis(restaurant.ratingBasis, restaurant.reviewCount, input.rating);
+    await db.update(restaurants).set(nextRating).where(eq(restaurants.id, input.restaurantId));
+  }
+  return { success: true as const };
 }
 
 export async function updateOrderState(input: { orderId: number; status?: "placed" | "confirmed" | "preparing" | "picked_up" | "on_the_way" | "delivered" | "cancelled"; paymentStatus?: "pending" | "initiated" | "paid" | "failed" }) {

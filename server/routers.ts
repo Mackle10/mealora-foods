@@ -3,8 +3,8 @@ import { fallbackCities, fallbackMenu, fallbackRestaurants, fallbackTracking } f
 import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, publicProcedure, protectedProcedure, router } from "./_core/trpc";
-import { createOrderForUser, createPartnerApplication, createSignupRequest, deleteAddressForUser, getAddressesForUser, getCitiesFromDb, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getReorderForUser, getRestaurantsFromDb, saveAddressForUser, toggleFavorite, updateOrderState, updateUserProfile } from "./db";
+import { courierProcedure, publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { createOrderForUser, createPartnerApplication, createRestaurantReview, createSignupRequest, deleteAddressForUser, getAddressesForUser, getCitiesFromDb, getCourierOrders, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getReorderForUser, getRestaurantsFromDb, getReviewsForRestaurant, saveAddressForUser, toggleFavorite, updateOrderState, updateUserProfile } from "./db";
 import { and, eq } from "drizzle-orm";
 import { orders } from "../drizzle/schema";
 import { z } from "zod";
@@ -82,12 +82,13 @@ export const appRouter = router({
   }),
   orders: router({
     list: protectedProcedure.query(({ ctx }) => getOrdersForUser(ctx.user.id)),
-    create: protectedProcedure.input(z.object({ restaurantId: z.number(), deliveryAddress: z.string().min(5), paymentMethod: z.enum(["cash_on_delivery", "mtn_momo", "airtel_money", "card"]), mobileMoneyPhone: z.string().min(7).max(40).optional(), items: z.array(z.object({ menuItemId: z.number(), quantity: z.number().int().min(1).max(20) })).min(1) })).mutation(({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ restaurantId: z.number(), deliveryAddress: z.string().min(5), specialInstructions: z.string().max(500).optional(), paymentMethod: z.enum(["cash_on_delivery", "mtn_momo", "airtel_money", "card"]), mobileMoneyPhone: z.string().min(7).max(40).optional(), items: z.array(z.object({ menuItemId: z.number(), quantity: z.number().int().min(1).max(20) })).min(1) })).mutation(({ ctx, input }) => {
       if (isMobileMoneyPayment(input.paymentMethod) && !input.mobileMoneyPhone) throw new Error("Enter the Mobile Money phone number to continue");
       return createOrderForUser({ ...input, userId: ctx.user.id });
     }),
-    reorder: protectedProcedure.input(z.object({ orderId: z.number().int().positive() })).mutation(async ({ ctx, input }) => createOrderForUser({ ...(await getReorderForUser(ctx.user.id, input.orderId)), userId: ctx.user.id })),
-    updateStatus: adminProcedure.input(z.object({ orderId: z.number().int().positive(), status: z.enum(["placed", "confirmed", "preparing", "picked_up", "on_the_way", "delivered", "cancelled"]).optional(), paymentStatus: z.enum(["pending", "initiated", "paid", "failed"]).optional() })).mutation(({ input }) => updateOrderState(input)),
+    reorderDraft: protectedProcedure.input(z.object({ orderId: z.number().int().positive() })).query(({ ctx, input }) => getReorderForUser(ctx.user.id, input.orderId)),
+    reorder: protectedProcedure.input(z.object({ orderId: z.number().int().positive(), specialInstructions: z.string().max(500).optional(), items: z.array(z.object({ menuItemId: z.number(), quantity: z.number().int().min(1).max(20) })).min(1).optional() })).mutation(async ({ ctx, input }) => { const source = await getReorderForUser(ctx.user.id, input.orderId); return createOrderForUser({ ...source, userId: ctx.user.id, specialInstructions: input.specialInstructions ?? source.specialInstructions, items: input.items ?? source.items }); }),
+    updateStatus: courierProcedure.input(z.object({ orderId: z.number().int().positive(), status: z.enum(["placed", "confirmed", "preparing", "picked_up", "on_the_way", "delivered", "cancelled"]).optional(), paymentStatus: z.enum(["pending", "initiated", "paid", "failed"]).optional() })).mutation(({ input }) => updateOrderState(input)),
     track: protectedProcedure.input(z.object({ orderId: z.number().optional() }).optional()).query(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db || !input?.orderId) return fallbackTracking;
@@ -96,6 +97,14 @@ export const appRouter = router({
       const order = row[0];
       return { ...fallbackTracking, status: order.status, label: order.status === "delivered" ? "Delivered" : `Order ${order.status.replace("_", " ")}`, etaMinutes: order.etaMinutes ?? 18, courierName: order.courierName ?? "Moses", courierLat: (order.courierLatE6 ?? 326600) / 1e6, courierLng: (order.courierLngE6 ?? 32582500) / 1e6, updatedAt: Date.now() };
     }),
+  }),
+  reviews: router({
+    list: publicProcedure.input(z.object({ restaurantId: z.number().int().positive() })).query(({ input }) => getReviewsForRestaurant(input.restaurantId)),
+    create: protectedProcedure.input(z.object({ restaurantId: z.number().int().positive(), orderId: z.number().int().positive(), rating: z.number().int().min(1).max(5), comment: z.string().max(500).optional() })).mutation(({ ctx, input }) => createRestaurantReview({ ...input, userId: ctx.user.id })),
+  }),
+  courier: router({
+    orders: courierProcedure.query(() => getCourierOrders()),
+    updateStatus: courierProcedure.input(z.object({ orderId: z.number().int().positive(), status: z.enum(["placed", "confirmed", "preparing", "picked_up", "on_the_way", "delivered", "cancelled"]).optional(), paymentStatus: z.enum(["pending", "initiated", "paid", "failed"]).optional() })).mutation(({ input }) => updateOrderState(input)),
   }),
   partners: router({
     submitApplication: protectedProcedure.input(z.object({ applicationType: z.enum(["restaurant", "courier", "business"]), businessName: z.string().min(2), contactEmail: z.string().email(), city: z.string().min(2), details: z.string().min(12) })).mutation(({ ctx, input }) => createPartnerApplication({ ...input, userId: ctx.user.id })),

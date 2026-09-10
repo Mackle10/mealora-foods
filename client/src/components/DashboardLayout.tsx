@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { BriefcaseBusiness, Heart, LayoutDashboard, LogOut, PanelLeft, ShoppingBag, UserRound } from "lucide-react";
+import { Bike, BriefcaseBusiness, Heart, LayoutDashboard, LogOut, PanelLeft, ShoppingBag, UserRound } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -32,6 +32,7 @@ const menuItems = [
   { icon: ShoppingBag, label: "Order history", path: "/profile?tab=orders" },
   { icon: Heart, label: "Saved places", path: "/profile?tab=saved" },
   { icon: BriefcaseBusiness, label: "Partner hub", path: "/partners" },
+  { icon: Bike, label: "Courier console", path: "/courier", requiresCourier: true },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -180,7 +181,7 @@ function DashboardLayoutContent({
 
           <SidebarContent className="gap-0">
             <SidebarMenu className="px-2 py-1">
-              {menuItems.map(item => {
+              {menuItems.filter(item => !item.requiresCourier || user?.role === "courier" || user?.role === "admin").map(item => {
                 const isActive = location === item.path;
                 return (
                   <SidebarMenuItem key={item.path}>

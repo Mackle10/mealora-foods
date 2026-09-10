@@ -7,7 +7,7 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 40 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  role: mysqlEnum("role", ["user", "admin", "courier"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -103,6 +103,7 @@ export const orders = mysqlTable("orders", {
   mobileMoneyReference: varchar("mobileMoneyReference", { length: 120 }),
   smsPhone: varchar("smsPhone", { length: 40 }),
   deliveryAddress: text("deliveryAddress").notNull(),
+  specialInstructions: text("specialInstructions"),
   courierName: varchar("courierName", { length: 120 }),
   courierPhone: varchar("courierPhone", { length: 40 }),
   courierLatE6: int("courierLatE6"),
@@ -134,6 +135,17 @@ export const smsNotifications = mysqlTable("smsNotifications", {
   errorMessage: text("errorMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   sentAt: timestamp("sentAt"),
+});
+
+export const restaurantReviews = mysqlTable("restaurantReviews", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  restaurantId: int("restaurantId").notNull(),
+  orderId: int("orderId").notNull().unique(),
+  rating: int("rating").notNull(),
+  comment: text("comment"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
 export const partnerApplications = mysqlTable("partnerApplications", {

@@ -43,3 +43,13 @@ export const adminProcedure = t.procedure.use(
     });
   }),
 );
+
+export const courierProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+    if (!ctx.user || !["admin", "courier"].includes(ctx.user.role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Courier access required" });
+    }
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  }),
+);
