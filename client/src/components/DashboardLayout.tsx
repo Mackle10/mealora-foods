@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { Bike, BriefcaseBusiness, Heart, LayoutDashboard, LogOut, PanelLeft, ShoppingBag, UserRound } from "lucide-react";
+import { Bike, BriefcaseBusiness, Heart, LayoutDashboard, LogOut, MessageSquareReply, PanelLeft, ShoppingBag, UserRound } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -33,6 +33,7 @@ const menuItems = [
   { icon: Heart, label: "Saved places", path: "/profile?tab=saved" },
   { icon: BriefcaseBusiness, label: "Partner hub", path: "/partners" },
   { icon: Bike, label: "Courier console", path: "/courier", requiresCourier: true },
+  { icon: MessageSquareReply, label: "Review studio", path: "/reviews" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";

@@ -1,0 +1,20 @@
+import DashboardLayout from "@/components/DashboardLayout";
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Eye, EyeOff, MessageSquareReply, ShieldCheck, Star } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+function ReviewCard({ review, admin = false }: { review: { id: number; restaurantId: number; rating: number; comment: string | null; reply: string | null; moderationStatus: "visible" | "hidden" | "pending" }; admin?: boolean }) {
+  const [reply, setReply] = useState(review.reply ?? "");
+  const replyMutation = trpc.reviews.reply.useMutation({ onSuccess: () => toast.success("Reply published"), onError: (error) => toast.error("Could not reply", { description: error.message }) });
+  const moderate = trpc.reviews.moderate.useMutation({ onSuccess: () => toast.success("Moderation state updated"), onError: (error) => toast.error("Could not update moderation", { description: error.message }) });
+  return <article className="review-operation-card"><div className="review-operation-head"><div className="review-stars-static">{[1, 2, 3, 4, 5].map((value) => <Star key={value} size={14} fill={value <= review.rating ? "currentColor" : "none"} />)}</div><span className={`review-status ${review.moderationStatus}`}>{review.moderationStatus}</span></div><p className="review-operation-comment">“{review.comment || "Customer left a rating without a comment."}”</p>{review.reply && <div className="review-owner-reply"><MessageSquareReply size={14} /><span>{review.reply}</span></div>}<div className="review-operation-actions">{admin ? <><button onClick={() => moderate.mutate({ reviewId: review.id, moderationStatus: review.moderationStatus === "hidden" ? "visible" : "hidden" })}>{review.moderationStatus === "hidden" ? <><Eye size={14} />Restore</> : <><EyeOff size={14} />Hide</>}</button><button onClick={() => moderate.mutate({ reviewId: review.id, moderationStatus: "pending" })}><ShieldCheck size={14} />Review later</button></> : <><textarea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Reply as the restaurant…" maxLength={500} /><button disabled={replyMutation.isPending || reply.trim().length < 2} onClick={() => replyMutation.mutate({ reviewId: review.id, reply: reply.trim() })}><MessageSquareReply size={14} />{replyMutation.isPending ? "Publishing…" : "Publish reply"}</button></>}</div></article>;
+}
+
+export default function ReviewOperations() {
+  const { user } = useAuth();
+  const owner = trpc.reviews.ownerInbox.useQuery(undefined, { enabled: Boolean(user) });
+  const moderation = trpc.reviews.moderationQueue.useQuery(undefined, { enabled: user?.role === "admin" });
+  return <DashboardLayout><div className="review-operations-page"><div className="review-operations-hero"><span className="dashboard-kicker">REPUTATION STUDIO</span><h1>Listen, respond, improve.</h1><p>Reply to customer feedback as a restaurant owner, or keep the Mealora review network healthy with simple moderation controls.</p></div>{user?.role === "admin" && <section className="review-operations-section"><div className="review-section-head"><div><span className="dashboard-kicker">ADMIN MODERATION</span><h2>Review queue</h2></div><span>{moderation.data?.length ?? 0} reviews</span></div><div className="review-operation-grid">{moderation.data?.map((review) => <ReviewCard key={review.id} review={review} admin />)}</div></section>}<section className="review-operations-section"><div className="review-section-head"><div><span className="dashboard-kicker">OWNER INBOX</span><h2>Customer feedback</h2></div><span>{owner.data?.length ?? 0} reviews</span></div>{owner.data?.length ? <div className="review-operation-grid">{owner.data.map((review) => <ReviewCard key={review.id} review={review} />)}</div> : <div className="review-empty"><MessageSquareReply size={25} /><h3>No owner reviews yet</h3><p>Once your restaurant is linked to your Mealora owner account, customer reviews will appear here.</p></div>}</section></div></DashboardLayout>;
+}

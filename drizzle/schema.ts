@@ -37,6 +37,7 @@ export const cities = mysqlTable("cities", {
 
 export const restaurants = mysqlTable("restaurants", {
   id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId"),
   cityId: int("cityId").notNull(),
   name: varchar("name", { length: 160 }).notNull(),
   slug: varchar("slug", { length: 160 }).notNull().unique(),
@@ -105,9 +106,12 @@ export const orders = mysqlTable("orders", {
   deliveryAddress: text("deliveryAddress").notNull(),
   specialInstructions: text("specialInstructions"),
   courierName: varchar("courierName", { length: 120 }),
+  courierId: int("courierId"),
   courierPhone: varchar("courierPhone", { length: 40 }),
   courierLatE6: int("courierLatE6"),
   courierLngE6: int("courierLngE6"),
+  courierLocationUpdatedAt: timestamp("courierLocationUpdatedAt"),
+  courierSharing: int("courierSharing").default(0).notNull(),
   etaMinutes: int("etaMinutes"),
   stripePaymentIntentId: varchar("stripePaymentIntentId", { length: 120 }),
   stripeCheckoutSessionId: varchar("stripeCheckoutSessionId", { length: 120 }),
@@ -144,6 +148,9 @@ export const restaurantReviews = mysqlTable("restaurantReviews", {
   orderId: int("orderId").notNull().unique(),
   rating: int("rating").notNull(),
   comment: text("comment"),
+  reply: text("reply"),
+  repliedAt: timestamp("repliedAt"),
+  moderationStatus: mysqlEnum("moderationStatus", ["visible", "hidden", "pending"]).default("visible").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

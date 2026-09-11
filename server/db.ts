@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurantReviews, restaurants, signupRequests, smsNotifications, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { getOrderNotificationEvent, sendSms } from "./sms";
-import { calculateNextRatingBasis, canReviewOrder } from "./reviews";
+import { calculateNextRatingBasis, canReviewOrder, isValidCourierPoint } from "./reviews";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -158,7 +158,46 @@ export async function getReorderForUser(userId: number, orderId: number) {
 export async function getReviewsForRestaurant(restaurantId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(restaurantReviews).where(eq(restaurantReviews.restaurantId, restaurantId)).orderBy(desc(restaurantReviews.createdAt)).limit(20);
+  return db.select().from(restaurantReviews).where(and(eq(restaurantReviews.restaurantId, restaurantId), eq(restaurantReviews.moderationStatus, "visible"))).orderBy(desc(restaurantReviews.createdAt)).limit(20);
+}
+
+export async function getReviewsForModeration() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(restaurantReviews).where(inArray(restaurantReviews.moderationStatus, ["visible", "pending", "hidden"])).orderBy(desc(restaurantReviews.createdAt)).limit(100);
+}
+
+export async function replyToRestaurantReview(input: { userId: number; reviewId: number; reply: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const review = (await db.select({ id: restaurantReviews.id, restaurantId: restaurantReviews.restaurantId }).from(restaurantReviews).where(eq(restaurantReviews.id, input.reviewId)).limit(1))[0];
+  if (!review) throw new Error("Review not found");
+  const restaurant = (await db.select({ ownerId: restaurants.ownerId }).from(restaurants).where(and(eq(restaurants.id, review.restaurantId), eq(restaurants.ownerId, input.userId))).limit(1))[0];
+  if (!restaurant) throw new Error("Only the restaurant owner can reply");
+  await db.update(restaurantReviews).set({ reply: input.reply, repliedAt: new Date() }).where(eq(restaurantReviews.id, input.reviewId));
+  return { success: true as const };
+}
+
+export async function getReviewsForOwner(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ id: restaurantReviews.id, restaurantId: restaurantReviews.restaurantId, rating: restaurantReviews.rating, comment: restaurantReviews.comment, reply: restaurantReviews.reply, moderationStatus: restaurantReviews.moderationStatus, createdAt: restaurantReviews.createdAt }).from(restaurantReviews).innerJoin(restaurants, eq(restaurants.id, restaurantReviews.restaurantId)).where(eq(restaurants.ownerId, userId)).orderBy(desc(restaurantReviews.createdAt)).limit(100);
+}
+
+export async function moderateRestaurantReview(input: { reviewId: number; moderationStatus: "visible" | "hidden" | "pending" }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  await db.update(restaurantReviews).set({ moderationStatus: input.moderationStatus }).where(eq(restaurantReviews.id, input.reviewId));
+  return { success: true as const };
+}
+
+export async function updateCourierLocation(input: { orderId: number; userId: number; lat: number; lng: number; sharing: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  if (!isValidCourierPoint(input.lat, input.lng)) throw new Error("Invalid courier coordinates");
+  const courier = (await db.select({ name: users.name }).from(users).where(eq(users.id, input.userId)).limit(1))[0];
+  const result = await db.update(orders).set({ courierId: input.userId, courierName: courier?.name ?? "Mealora courier", courierLatE6: Math.round(input.lat * 1e6), courierLngE6: Math.round(input.lng * 1e6), courierLocationUpdatedAt: new Date(), courierSharing: input.sharing ? 1 : 0 }).where(eq(orders.id, input.orderId));
+  return { success: true as const, result };
 }
 
 export async function createRestaurantReview(input: { userId: number; restaurantId: number; orderId: number; rating: number; comment?: string }) {
