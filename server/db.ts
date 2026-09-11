@@ -1,9 +1,10 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurantReviews, restaurants, signupRequests, smsNotifications, users } from "../drizzle/schema";
+import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurantReviews, restaurants, reviewReports, signupRequests, smsNotifications, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { getOrderNotificationEvent, sendSms } from "./sms";
 import { calculateNextRatingBasis, canReviewOrder, isValidCourierPoint } from "./reviews";
+import { canReportReview } from "./access";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -117,6 +118,70 @@ export async function getCourierOrders() {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(orders).where(inArray(orders.status, ["placed", "confirmed", "preparing", "picked_up", "on_the_way"])).orderBy(desc(orders.updatedAt));
+}
+
+export async function getVerifiedRestaurantsForOwner(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(restaurants).where(and(eq(restaurants.ownerId, userId), eq(restaurants.ownerVerified, 1)));
+}
+
+export async function getOwnerMenu(userId: number, restaurantId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const owner = (await db.select({ id: restaurants.id }).from(restaurants).where(and(eq(restaurants.id, restaurantId), eq(restaurants.ownerId, userId), eq(restaurants.ownerVerified, 1))).limit(1))[0];
+  if (!owner) throw new Error("Verified restaurant owner access required");
+  return db.select().from(menuItems).where(eq(menuItems.restaurantId, restaurantId)).orderBy(desc(menuItems.updatedAt));
+}
+
+export async function getOwnerOrders(userId: number, restaurantId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const owner = (await db.select({ id: restaurants.id }).from(restaurants).where(and(eq(restaurants.id, restaurantId), eq(restaurants.ownerId, userId), eq(restaurants.ownerVerified, 1))).limit(1))[0];
+  if (!owner) throw new Error("Verified restaurant owner access required");
+  return db.select().from(orders).where(eq(orders.restaurantId, restaurantId)).orderBy(desc(orders.updatedAt)).limit(100);
+}
+
+export async function saveOwnerMenuItem(input: { userId: number; restaurantId: number; menuItemId?: number; name: string; description: string; category: string; imageUrl: string; priceCents: number; isAvailable: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const owner = (await db.select({ id: restaurants.id }).from(restaurants).where(and(eq(restaurants.id, input.restaurantId), eq(restaurants.ownerId, input.userId), eq(restaurants.ownerVerified, 1))).limit(1))[0];
+  if (!owner) throw new Error("Verified restaurant owner access required");
+  const values = { restaurantId: input.restaurantId, name: input.name, description: input.description, category: input.category, imageUrl: input.imageUrl, priceCents: input.priceCents, currency: "UGX", isAvailable: input.isAvailable ? 1 : 0 };
+  if (input.menuItemId) await db.update(menuItems).set(values).where(and(eq(menuItems.id, input.menuItemId), eq(menuItems.restaurantId, input.restaurantId)));
+  else await db.insert(menuItems).values(values);
+  return { success: true as const };
+}
+
+export async function getReviewReports() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(reviewReports).where(eq(reviewReports.status, "open")).orderBy(desc(reviewReports.createdAt)).limit(100);
+}
+
+export async function reportRestaurantReview(input: { userId: number; reviewId: number; reason: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const review = (await db.select({ id: restaurantReviews.id, userId: restaurantReviews.userId }).from(restaurantReviews).where(eq(restaurantReviews.id, input.reviewId)).limit(1))[0];
+  if (!review) throw new Error("Review not found");
+  if (!canReportReview(input.userId, review.userId)) throw new Error("You cannot report your own review");
+  await db.insert(reviewReports).values({ reviewId: input.reviewId, reporterId: input.userId, reason: input.reason });
+  return { success: true as const };
+}
+
+export async function resolveReviewReport(reportId: number, status: "dismissed" | "actioned") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  await db.update(reviewReports).set({ status, resolvedAt: new Date() }).where(eq(reviewReports.id, reportId));
+  return { success: true as const };
+}
+
+export async function updateOwnerOrderState(input: { userId: number; orderId: number; status: "placed" | "confirmed" | "preparing" | "picked_up" | "on_the_way" | "delivered" | "cancelled" }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  const owned = (await db.select({ id: orders.id }).from(orders).innerJoin(restaurants, eq(restaurants.id, orders.restaurantId)).where(and(eq(orders.id, input.orderId), eq(restaurants.ownerId, input.userId), eq(restaurants.ownerVerified, 1))).limit(1))[0];
+  if (!owned) throw new Error("Verified restaurant owner access required");
+  return updateOrderState({ orderId: input.orderId, status: input.status });
 }
 
 export async function createOrderForUser(input: { userId: number; restaurantId: number; deliveryAddress: string; specialInstructions?: string; paymentMethod: "cash_on_delivery" | "mtn_momo" | "airtel_money" | "card"; mobileMoneyPhone?: string; items: Array<{ menuItemId: number; quantity: number }> }) {

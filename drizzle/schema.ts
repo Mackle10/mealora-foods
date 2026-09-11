@@ -7,7 +7,7 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 40 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin", "courier"]).default("user").notNull(),
+  role: mysqlEnum("role", ["user", "admin", "courier", "restaurant_owner"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -38,6 +38,7 @@ export const cities = mysqlTable("cities", {
 export const restaurants = mysqlTable("restaurants", {
   id: int("id").autoincrement().primaryKey(),
   ownerId: int("ownerId"),
+  ownerVerified: int("ownerVerified").default(0).notNull(),
   cityId: int("cityId").notNull(),
   name: varchar("name", { length: 160 }).notNull(),
   slug: varchar("slug", { length: 160 }).notNull().unique(),
@@ -154,6 +155,16 @@ export const restaurantReviews = mysqlTable("restaurantReviews", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+export const reviewReports = mysqlTable("reviewReports", {
+  id: int("id").autoincrement().primaryKey(),
+  reviewId: int("reviewId").notNull(),
+  reporterId: int("reporterId").notNull(),
+  reason: varchar("reason", { length: 240 }).notNull(),
+  status: mysqlEnum("status", ["open", "dismissed", "actioned"]).default("open").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  resolvedAt: timestamp("resolvedAt"),
+}, table => ({ reviewReporterUnique: uniqueIndex("review_reports_review_reporter_unique").on(table.reviewId, table.reporterId) }));
 
 export const partnerApplications = mysqlTable("partnerApplications", {
   id: int("id").autoincrement().primaryKey(),

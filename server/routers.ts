@@ -3,8 +3,8 @@ import { fallbackCities, fallbackMenu, fallbackRestaurants, fallbackTracking } f
 import { getSessionCookieOptions } from "./_core/cookies";
 import { invokeLLM } from "./_core/llm";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, courierProcedure, publicProcedure, protectedProcedure, router } from "./_core/trpc";
-import { createOrderForUser, createPartnerApplication, createRestaurantReview, createSignupRequest, deleteAddressForUser, getAddressesForUser, getCitiesFromDb, getCourierOrders, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getReorderForUser, getRestaurantsFromDb, getReviewsForModeration, getReviewsForOwner, getReviewsForRestaurant, moderateRestaurantReview, replyToRestaurantReview, saveAddressForUser, toggleFavorite, updateCourierLocation, updateOrderState, updateUserProfile } from "./db";
+import { adminProcedure, courierProcedure, publicProcedure, protectedProcedure, restaurantOwnerProcedure, router } from "./_core/trpc";
+import { createOrderForUser, createPartnerApplication, createRestaurantReview, createSignupRequest, deleteAddressForUser, getAddressesForUser, getCitiesFromDb, getCourierOrders, getDb, getFavoritesForUser, getMenuFromDb, getOrdersForUser, getOwnerMenu, getOwnerOrders, getReorderForUser, getRestaurantsFromDb, getReviewReports, getReviewsForModeration, getReviewsForOwner, getReviewsForRestaurant, moderateRestaurantReview, reportRestaurantReview, replyToRestaurantReview, resolveReviewReport, saveAddressForUser, saveOwnerMenuItem, toggleFavorite, updateCourierLocation, updateOrderState, updateOwnerOrderState, updateUserProfile, getVerifiedRestaurantsForOwner } from "./db";
 import { and, eq } from "drizzle-orm";
 import { orders } from "../drizzle/schema";
 import { z } from "zod";
@@ -95,21 +95,31 @@ export const appRouter = router({
       const row = await db.select().from(orders).where(and(eq(orders.id, input.orderId), eq(orders.userId, ctx.user.id))).limit(1);
       if (!row[0]) return fallbackTracking;
       const order = row[0];
-      return { ...fallbackTracking, status: order.status, label: order.status === "delivered" ? "Delivered" : `Order ${order.status.replace("_", " ")}`, etaMinutes: order.etaMinutes ?? 18, courierName: order.courierName ?? "Moses", courierLat: (order.courierLatE6 ?? 326600) / 1e6, courierLng: (order.courierLngE6 ?? 32582500) / 1e6, updatedAt: Date.now() };
+      return { ...fallbackTracking, status: order.status, label: order.status === "delivered" ? "Delivered" : `Order ${order.status.replace("_", " ")}`, etaMinutes: order.etaMinutes ?? 18, courierName: order.courierName ?? "Moses", courierLat: (order.courierLatE6 ?? 326600) / 1e6, courierLng: (order.courierLngE6 ?? 32582500) / 1e6, courierSharing: Boolean(order.courierSharing), courierLocationUpdatedAt: order.courierLocationUpdatedAt?.getTime() ?? null, updatedAt: Date.now() };
     }),
   }),
   reviews: router({
     list: publicProcedure.input(z.object({ restaurantId: z.number().int().positive() })).query(({ input }) => getReviewsForRestaurant(input.restaurantId)),
     create: protectedProcedure.input(z.object({ restaurantId: z.number().int().positive(), orderId: z.number().int().positive(), rating: z.number().int().min(1).max(5), comment: z.string().max(500).optional() })).mutation(({ ctx, input }) => createRestaurantReview({ ...input, userId: ctx.user.id })),
     reply: protectedProcedure.input(z.object({ reviewId: z.number().int().positive(), reply: z.string().min(2).max(500) })).mutation(({ ctx, input }) => replyToRestaurantReview({ ...input, userId: ctx.user.id })),
+    report: protectedProcedure.input(z.object({ reviewId: z.number().int().positive(), reason: z.string().min(3).max(240) })).mutation(({ ctx, input }) => reportRestaurantReview({ ...input, userId: ctx.user.id })),
     ownerInbox: protectedProcedure.query(({ ctx }) => getReviewsForOwner(ctx.user.id)),
     moderationQueue: adminProcedure.query(() => getReviewsForModeration()),
     moderate: adminProcedure.input(z.object({ reviewId: z.number().int().positive(), moderationStatus: z.enum(["visible", "hidden", "pending"]) })).mutation(({ input }) => moderateRestaurantReview(input)),
+    reports: adminProcedure.query(() => getReviewReports()),
+    resolveReport: adminProcedure.input(z.object({ reportId: z.number().int().positive(), status: z.enum(["dismissed", "actioned"]) })).mutation(({ input }) => resolveReviewReport(input.reportId, input.status)),
   }),
   courier: router({
     orders: courierProcedure.query(() => getCourierOrders()),
     updateStatus: courierProcedure.input(z.object({ orderId: z.number().int().positive(), status: z.enum(["placed", "confirmed", "preparing", "picked_up", "on_the_way", "delivered", "cancelled"]).optional(), paymentStatus: z.enum(["pending", "initiated", "paid", "failed"]).optional() })).mutation(({ input }) => updateOrderState(input)),
     updateLocation: courierProcedure.input(z.object({ orderId: z.number().int().positive(), lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), sharing: z.boolean() })).mutation(({ ctx, input }) => updateCourierLocation({ ...input, userId: ctx.user.id })),
+  }),
+  owner: router({
+    restaurants: restaurantOwnerProcedure.query(({ ctx }) => getVerifiedRestaurantsForOwner(ctx.user.id)),
+    menu: restaurantOwnerProcedure.input(z.object({ restaurantId: z.number().int().positive() })).query(({ ctx, input }) => getOwnerMenu(ctx.user.id, input.restaurantId)),
+    orders: restaurantOwnerProcedure.input(z.object({ restaurantId: z.number().int().positive() })).query(({ ctx, input }) => getOwnerOrders(ctx.user.id, input.restaurantId)),
+    saveMenuItem: restaurantOwnerProcedure.input(z.object({ restaurantId: z.number().int().positive(), menuItemId: z.number().int().positive().optional(), name: z.string().min(2).max(160), description: z.string().min(2).max(500), category: z.string().min(2).max(100), imageUrl: z.string().url(), priceCents: z.number().int().positive(), isAvailable: z.boolean() })).mutation(({ ctx, input }) => saveOwnerMenuItem({ ...input, userId: ctx.user.id })),
+    updateOrder: restaurantOwnerProcedure.input(z.object({ orderId: z.number().int().positive(), status: z.enum(["placed", "confirmed", "preparing", "picked_up", "on_the_way", "delivered", "cancelled"]) })).mutation(({ ctx, input }) => updateOwnerOrderState({ ...input, userId: ctx.user.id })),
   }),
   partners: router({
     submitApplication: protectedProcedure.input(z.object({ applicationType: z.enum(["restaurant", "courier", "business"]), businessName: z.string().min(2), contactEmail: z.string().email(), city: z.string().min(2), details: z.string().min(12) })).mutation(({ ctx, input }) => createPartnerApplication({ ...input, userId: ctx.user.id })),

@@ -53,3 +53,13 @@ export const courierProcedure = t.procedure.use(
     return next({ ctx: { ...ctx, user: ctx.user } });
   }),
 );
+
+export const restaurantOwnerProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+    if (!ctx.user || !["admin", "restaurant_owner"].includes(ctx.user.role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Verified restaurant owner access required" });
+    }
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  }),
+);

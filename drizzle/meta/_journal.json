@@ -43,6 +43,13 @@
       "when": 1789120523658,
       "tag": "0005_swift_glorian",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1789163093984,
+      "tag": "0006_omniscient_mister_sinister",
+      "breakpoints": true
     }
   ]
 }
