@@ -9,6 +9,8 @@ import { and, eq } from "drizzle-orm";
 import { orders } from "../drizzle/schema";
 import { z } from "zod";
 import { isMobileMoneyPayment } from "./payment-readiness";
+import { addModerationAction, getAdminUsers, getModerationHistory, getPartnerApplications, getReviewReportHistory, reviewPartnerApplication, updateUserRole } from "./admin-db";
+import { normalizeModeratorNotes } from "./admin-validation";
 
 const textFromResponse = (content: unknown) => {
   if (typeof content === "string") return content;
@@ -107,7 +109,9 @@ export const appRouter = router({
     moderationQueue: adminProcedure.query(() => getReviewsForModeration()),
     moderate: adminProcedure.input(z.object({ reviewId: z.number().int().positive(), moderationStatus: z.enum(["visible", "hidden", "pending"]) })).mutation(({ input }) => moderateRestaurantReview(input)),
     reports: adminProcedure.query(() => getReviewReports()),
-    resolveReport: adminProcedure.input(z.object({ reportId: z.number().int().positive(), status: z.enum(["dismissed", "actioned"]) })).mutation(({ input }) => resolveReviewReport(input.reportId, input.status)),
+    reportHistory: adminProcedure.query(() => getReviewReportHistory()),
+    moderationHistory: adminProcedure.query(() => getModerationHistory()),
+    resolveReport: adminProcedure.input(z.object({ reportId: z.number().int().positive(), reviewId: z.number().int().positive().optional(), status: z.enum(["dismissed", "actioned"]), notes: z.string().max(1000).optional() })).mutation(({ ctx, input }) => resolveReviewReport(input.reportId, input.status).then(() => addModerationAction({ reportId: input.reportId, reviewId: input.reviewId, moderatorId: ctx.user.id, action: input.status, notes: normalizeModeratorNotes(input.notes) }))),
   }),
   courier: router({
     orders: courierProcedure.query(() => getCourierOrders()),
@@ -120,6 +124,12 @@ export const appRouter = router({
     orders: restaurantOwnerProcedure.input(z.object({ restaurantId: z.number().int().positive() })).query(({ ctx, input }) => getOwnerOrders(ctx.user.id, input.restaurantId)),
     saveMenuItem: restaurantOwnerProcedure.input(z.object({ restaurantId: z.number().int().positive(), menuItemId: z.number().int().positive().optional(), name: z.string().min(2).max(160), description: z.string().min(2).max(500), category: z.string().min(2).max(100), imageUrl: z.string().url(), priceCents: z.number().int().positive(), isAvailable: z.boolean() })).mutation(({ ctx, input }) => saveOwnerMenuItem({ ...input, userId: ctx.user.id })),
     updateOrder: restaurantOwnerProcedure.input(z.object({ orderId: z.number().int().positive(), status: z.enum(["placed", "confirmed", "preparing", "picked_up", "on_the_way", "delivered", "cancelled"]) })).mutation(({ ctx, input }) => updateOwnerOrderState({ ...input, userId: ctx.user.id })),
+  }),
+  admin: router({
+    applications: adminProcedure.query(() => getPartnerApplications()),
+    reviewApplication: adminProcedure.input(z.object({ applicationId: z.number().int().positive(), status: z.enum(["reviewing", "approved", "declined"]) })).mutation(({ input }) => reviewPartnerApplication(input)),
+    users: adminProcedure.query(() => getAdminUsers()),
+    updateRole: adminProcedure.input(z.object({ userId: z.number().int().positive(), role: z.enum(["user", "admin", "courier", "restaurant_owner"]) })).mutation(({ ctx, input }) => updateUserRole({ ...input, actorId: ctx.user.id })),
   }),
   partners: router({
     submitApplication: protectedProcedure.input(z.object({ applicationType: z.enum(["restaurant", "courier", "business"]), businessName: z.string().min(2), contactEmail: z.string().email(), city: z.string().min(2), details: z.string().min(12) })).mutation(({ ctx, input }) => createPartnerApplication({ ...input, userId: ctx.user.id })),

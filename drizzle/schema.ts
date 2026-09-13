@@ -166,6 +166,16 @@ export const reviewReports = mysqlTable("reviewReports", {
   resolvedAt: timestamp("resolvedAt"),
 }, table => ({ reviewReporterUnique: uniqueIndex("review_reports_review_reporter_unique").on(table.reviewId, table.reporterId) }));
 
+export const moderationActions = mysqlTable("moderationActions", {
+  id: int("id").autoincrement().primaryKey(),
+  reportId: int("reportId"),
+  reviewId: int("reviewId"),
+  moderatorId: int("moderatorId").notNull(),
+  action: varchar("action", { length: 40 }).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const partnerApplications = mysqlTable("partnerApplications", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),

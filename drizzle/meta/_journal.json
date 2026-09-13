@@ -50,6 +50,13 @@
       "when": 1789163093984,
       "tag": "0006_omniscient_mister_sinister",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1789299243746,
+      "tag": "0007_redundant_vivisector",
+      "breakpoints": true
     }
   ]
 }

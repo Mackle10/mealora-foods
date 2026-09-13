@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { Bike, BriefcaseBusiness, ChefHat, Heart, LayoutDashboard, LogOut, MessageSquareReply, PanelLeft, ShoppingBag, UserRound } from "lucide-react";
+import { Bike, BriefcaseBusiness, ChefHat, Heart, LayoutDashboard, LogOut, MessageSquareReply, PanelLeft, ShieldAlert, ShoppingBag, UserRound } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -35,6 +35,7 @@ const menuItems = [
   { icon: Bike, label: "Courier console", path: "/courier", requiresCourier: true },
   { icon: MessageSquareReply, label: "Review studio", path: "/reviews" },
   { icon: ChefHat, label: "Owner dashboard", path: "/owner", requiresOwner: true },
+  { icon: ShieldAlert, label: "Admin console", path: "/admin", requiresAdmin: true },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -183,7 +184,7 @@ function DashboardLayoutContent({
 
           <SidebarContent className="gap-0">
             <SidebarMenu className="px-2 py-1">
-              {menuItems.filter(item => (!item.requiresCourier || user?.role === "courier" || user?.role === "admin") && (!item.requiresOwner || user?.role === "restaurant_owner" || user?.role === "admin")).map(item => {
+              {menuItems.filter(item => (!item.requiresCourier || user?.role === "courier" || user?.role === "admin") && (!item.requiresOwner || user?.role === "restaurant_owner" || user?.role === "admin") && (!item.requiresAdmin || user?.role === "admin")).map(item => {
                 const isActive = location === item.path;
                 return (
                   <SidebarMenuItem key={item.path}>

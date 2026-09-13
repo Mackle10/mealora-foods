@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, cities, deliveryAddresses, favorites, menuItems, orderItems, orders, partnerApplications, restaurantReviews, restaurants, reviewReports, signupRequests, smsNotifications, users } from "../drizzle/schema";
+import { InsertUser, cities, deliveryAddresses, favorites, menuItems, moderationActions, orderItems, orders, partnerApplications, restaurantReviews, restaurants, reviewReports, signupRequests, smsNotifications, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { getOrderNotificationEvent, sendSms } from "./sms";
 import { calculateNextRatingBasis, canReviewOrder, isValidCourierPoint } from "./reviews";
